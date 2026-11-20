@@ -107,6 +107,7 @@ async function api(path, options={}) {
   };
 
   const output = document.getElementById('sectionContent');
+    alert('Panel found: ' + !!output);
   document.getElementById('sectionTitle').textContent =
     titles[section] || 'Admin Section';
 
