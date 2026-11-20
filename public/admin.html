@@ -1,0 +1,145 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CrownVotes Admin</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f4f5f9;margin:0;padding:20px;color:#222}
+.container{max-width:650px;margin:20px auto;background:white;padding:22px;border-radius:12px;box-shadow:0 3px 15px #0001}
+h1{color:#35206d}
+input,button{width:100%;padding:13px;margin:8px 0;box-sizing:border-box;border-radius:7px;font-size:16px}
+input{border:1px solid #ccc}
+button{background:#35206d;color:white;border:0;font-weight:bold}
+button:disabled{opacity:.6}
+.hidden{display:none}
+.panel{background:#f5f2fc;padding:15px;margin:12px 0;border-radius:8px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere}
+#message{color:#a12626}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>CrownVotes Admin</h1>
+<p>Administrator control panel</p>
+
+<div id="login">
+<h2>Admin Login</h2>
+<form id="loginForm">
+<input id="email" type="email" placeholder="Admin email" required>
+<input id="password" type="password" placeholder="Admin password" required>
+<button type="submit">Login</button>
+</form>
+</div>
+
+<div id="dashboard" class="hidden">
+<h2>Dashboard</h2>
+<p id="welcome"></p>
+<button id="refresh">Refresh Dashboard</button>
+<div class="panel">
+<h3>Overview</h3>
+<pre id="overview">Loading...</pre>
+</div>
+<div class="panel">
+<h3>Events</h3>
+<pre id="events">Loading...</pre>
+</div>
+<button id="logout">Logout</button>
+</div>
+
+<p id="message"></p>
+</div>
+
+<script>
+const message = document.getElementById('message');
+let token = localStorage.getItem('crownvotes_admin_token');
+
+async function api(path, options={}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? {'Authorization': 'Bearer ' + token} : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function loadDashboard() {
+  try {
+    const user = await api('/api/me');
+    if (!user || !user.role || user.role !== 'admin') {
+      throw new Error('This account is not an administrator account.');
+    }
+
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+    document.getElementById('welcome').textContent =
+      'Logged in as ' + (user.email || 'Administrator');
+
+    const results = await Promise.allSettled([
+      api('/api/admin/overview'),
+      api('/api/admin/events')
+    ]);
+
+    document.getElementById('overview').textContent =
+      results[0].status === 'fulfilled'
+        ? JSON.stringify(results[0].value, null, 2)
+        : results[0].reason.message;
+
+    document.getElementById('events').textContent =
+      results[1].status === 'fulfilled'
+        ? JSON.stringify(results[1].value, null, 2)
+        : results[1].reason.message;
+
+    message.textContent = '';
+  } catch (error) {
+    token = null;
+    localStorage.removeItem('crownvotes_admin_token');
+    document.getElementById('dashboard').classList.add('hidden');
+    document.getElementById('login').classList.remove('hidden');
+    message.textContent = error.message;
+  }
+}
+
+document.getElementById('loginForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  message.textContent = 'Signing in...';
+
+  try {
+    const result = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value
+      })
+    });
+
+    if (!result.token) throw new Error('Login did not return a token.');
+
+    token = result.token;
+    localStorage.setItem('crownvotes_admin_token', token);
+    await loadDashboard();
+  } catch (error) {
+    message.textContent = error.message;
+  }
+});
+
+document.getElementById('refresh').addEventListener('click', loadDashboard);
+
+document.getElementById('logout').addEventListener('click', () => {
+  token = null;
+  localStorage.removeItem('crownvotes_admin_token');
+  document.getElementById('dashboard').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+  message.textContent = 'You have logged out.';
+});
+
+if (token) loadDashboard();
+</script>
+</body>
+</html>
