@@ -36,6 +36,15 @@ const payoutKey=createHash('sha256').update(process.env.PAYOUT_DATA_KEY || JWT_S
 function seal(value){const iv=randomBytes(12);const cipher=createCipheriv('aes-256-gcm',payoutKey,iv);const encrypted=Buffer.concat([cipher.update(String(value),'utf8'),cipher.final()]);return `enc:v1:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${encrypted.toString('base64')}`}
 function unseal(value){if(!String(value).startsWith('enc:v1:'))return value;const [, ,iv,tag,data]=String(value).split(':');const decipher=createDecipheriv('aes-256-gcm',payoutKey,Buffer.from(iv,'base64'));decipher.setAuthTag(Buffer.from(tag,'base64'));return Buffer.concat([decipher.update(Buffer.from(data,'base64')),decipher.final()]).toString('utf8')}
 app.get('/api/health',(_,res)=>res.json({ok:true,app:'CrownVotes',mode:process.env.NODE_ENV||'development'}));
+app.get('/api/admin-check',(_,res)=>{
+  const email=(process.env.ADMIN_EMAIL||'').trim().toLowerCase();
+  const u=email?db.prepare('SELECT role FROM users WHERE email=?').get(email):null;
+  res.json({
+    adminEmailConfigured:!!email,
+    adminAccountFound:!!u,
+    accountRole:u?.role||null
+  });
+});
 app.post('/api/auth/register',authLimit,(req,res)=>{const p=z.object({name:z.string().trim().min(2).max(80),email:z.string().email(),password:z.string().min(10).max(100)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Enter a valid name, email and password of at least 10 characters.'});try{const x=db.prepare('INSERT INTO users(name,email,password_hash) VALUES(?,?,?)').run(p.data.name,p.data.email.toLowerCase(),bcrypt.hashSync(p.data.password,12));const u=db.prepare('SELECT id,name,email,role FROM users WHERE id=?').get(x.lastInsertRowid);res.status(201).json({token:tokenFor(u),user:u})}catch{return res.status(409).json({error:'An account with that email already exists.'})}});
 app.post('/api/auth/login',authLimit,(req,res)=>{const p=z.object({email:z.string().email(),password:z.string().min(1)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Enter email and password.'});const u=db.prepare('SELECT * FROM users WHERE email=?').get(p.data.email.toLowerCase());if(!u||!bcrypt.compareSync(p.data.password,u.password_hash))return res.status(401).json({error:'Incorrect email or password.'});res.json({token:tokenFor(u),user:{id:u.id,name:u.name,email:u.email,role:u.role}})});
 app.get('/api/me',auth,(req,res)=>res.json(db.prepare('SELECT id,name,email,role,created_at FROM users WHERE id=?').get(req.user.id)));
