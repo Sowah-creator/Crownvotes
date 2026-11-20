@@ -36,21 +36,29 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
 </div>
 
 <div id="dashboard" class="hidden">
-<h2>Dashboard</h2>
+<h2>Admin Control Centre</h2>
 <p id="welcome"></p>
-<button id="refresh">Refresh Dashboard</button>
+
 <div class="panel">
-<h3>Overview</h3>
-<pre id="overview">Loading...</pre>
-</div>
-<div class="panel">
-<h3>Events</h3>
-<pre id="events">Loading...</pre>
-</div>
-<button id="logout">Logout</button>
+<h3>Management Menu</h3>
+<button onclick="showSection('overview')">Overview</button>
+<button onclick="showSection('users')">Users</button>
+<button onclick="showSection('organizers')">Organizers</button>
+<button onclick="showSection('applications')">Applications</button>
+<button onclick="showSection('events')">Events</button>
+<button onclick="showSection('finance')">Finance</button>
+<button onclick="showSection('payouts')">Payouts</button>
+<button onclick="showSection('results')">Results</button>
+<button onclick="showSection('audit-logs')">Audit Logs</button>
 </div>
 
-<p id="message"></p>
+<div class="panel">
+<h3 id="sectionTitle">Overview</h3>
+<pre id="sectionContent">Loading...</pre>
+<button id="refresh">Refresh Section</button>
+</div>
+
+<button id="logout">Logout</button>
 </div>
 
 <script>
@@ -71,12 +79,72 @@ async function api(path, options={}) {
   return data;
 }
 
+  async function showSection(section) {
+  const endpoints = {
+    overview: '/api/admin/overview',
+    users: '/api/admin/users',
+    organizers: '/api/admin/applications',
+    applications: '/api/admin/applications',
+    events: '/api/admin/events',
+    finance: '/api/admin/finance',
+    payouts: '/api/admin/finance',
+    results: '/api/admin/results',
+    'audit-logs': '/api/admin/audit-logs'
+  };
+
+  const titles = {
+    overview: 'Overview',
+    users: 'Users',
+    organizers: 'Organizers',
+    applications: 'Organiser Applications',
+    events: 'Events',
+    finance: 'Finance',
+    payouts: 'Payouts',
+    results: 'Election Results',
+    'audit-logs': 'Audit Logs'
+  };
+
+  const output = document.getElementById('sectionContent');
+  document.getElementById('sectionTitle').textContent =
+    titles[section] || 'Admin Section';
+
+  output.textContent = 'Loading...';
+
+  try {
+    const data = await api(endpoints[section]);
+    output.textContent = JSON.stringify(data, null, 2);
+  } catch (error) {
+    output.textContent = 'Error: ' + error.message;
+  }
+}
 async function loadDashboard() {
   try {
     const user = await api('/api/me');
-    if (!user || !user.role || user.role !== 'admin') {
+
+    if (!user || user.role !== 'admin') {
       throw new Error('This account is not an administrator account.');
     }
+
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+
+    document.getElementById('welcome').textContent =
+      'Logged in as ' + (user.email || 'Administrator');
+
+    message.textContent = '';
+
+    await showSection('overview');
+
+  } catch (error) {
+    token = null;
+    localStorage.removeItem('crownvotes_admin_token');
+
+    document.getElementById('dashboard').classList.add('hidden');
+    document.getElementById('login').classList.remove('hidden');
+
+    message.textContent = error.message;
+  }
+}
 
     document.getElementById('login').classList.add('hidden');
     document.getElementById('dashboard').classList.remove('hidden');
