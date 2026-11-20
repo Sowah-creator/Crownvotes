@@ -1,13 +1,98 @@
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CrownVotes</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#101027">
+<title>CrownVotes | Awards & Voting</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f5fa;color:#191936;font-family:Arial,sans-serif}
+header{background:#101027;color:white;padding:22px 6%;display:flex;justify-content:space-between;align-items:center}
+.logo{font-size:25px;font-weight:800;color:#f5c451}
+nav a{color:white;text-decoration:none;margin-left:15px;font-size:14px}
+.hero{background:linear-gradient(130deg,#101027,#34306c);color:white;padding:65px 7%;text-align:center}
+.hero h1{font-size:38px;margin:0 0 14px}
+.hero p{color:#ddd;line-height:1.6}
+.btn{display:inline-block;background:#f5c451;color:#17172d;padding:13px 22px;border:0;border-radius:7px;font-weight:bold;text-decoration:none;cursor:pointer}
+section{padding:35px 6%}
+h2{margin-bottom:20px}
+.events{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px}
+.card{background:white;border-radius:12px;padding:22px;box-shadow:0 3px 15px #0000000c}
+.card h3{margin-top:0}
+.muted{color:#777;font-size:14px;line-height:1.5}
+footer{background:#101027;color:#ddd;text-align:center;padding:25px;font-size:13px}
+#message{margin-top:15px;color:#b33}
+@media(max-width:600px){header{padding:18px 4%}nav a{margin-left:7px;font-size:12px}.hero h1{font-size:29px}}
+</style>
 </head>
 <body>
-  <h1>Welcome to CrownVotes</h1>
-  <p>Your awards voting platform is coming soon.</p>
+<header>
+<div class="logo">♛ CrownVotes</div>
+<nav>
+<a href="#home">Home</a>
+<a href="#events">Events</a>
+<a href="#about">About</a>
+</nav>
+</header>
+
+<div class="hero" id="home">
+<h1>Your Vote. Your Voice. Your Crown.</h1>
+<p>Discover awards, support your favourite nominees and make every vote count.</p>
+<a class="btn" href="#events">Explore Events</a>
+</div>
+
+<section id="events">
+<h2>🏆 Featured Voting Events</h2>
+<div class="events" id="eventList">
+<div class="card">
+<h3>Welcome to CrownVotes</h3>
+<p class="muted">Loading published voting events...</p>
+</div>
+</div>
+<p id="message"></p>
+</section>
+
+<section id="about">
+<h2>About CrownVotes</h2>
+<p class="muted">CrownVotes is an awards and voting platform designed to connect organisers, nominees and voters through a transparent digital voting experience.</p>
+</section>
+
+<footer>
+<p>© 2026 CrownVotes. All rights reserved.</p>
+<p>Your Vote. Your Voice. Your Crown.</p>
+</footer>
+
+<script>
+async function loadEvents(){
+const list=document.getElementById('eventList');
+const message=document.getElementById('message');
+try{
+const response=await fetch('/api/events');
+if(!response.ok)throw new Error('Events unavailable');
+const data=await response.json();
+const events=Array.isArray(data)?data:(data.events||[]);
+if(!events.length){
+list.innerHTML='<div class="card"><h3>No published events yet</h3><p class="muted">Please check again later.</p></div>';
+return;
+}
+list.innerHTML=events.map(e=>`
+<div class="card">
+<h3>${escapeHTML(e.title)}</h3>
+<p class="muted">${escapeHTML(e.description||'Vote for your favourite nominee.')}</p>
+<a class="btn" href="/event/${encodeURIComponent(e.slug)}">View Event</a>
+</div>`).join('');
+}catch(error){
+list.innerHTML='<div class="card"><h3>Welcome to CrownVotes</h3><p class="muted">Voting events will appear here when available.</p></div>';
+message.textContent='Event information is currently unavailable.';
+}
+}
+function escapeHTML(value){
+return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+loadEvents();
+</script>
 </body>
 </html>
+
