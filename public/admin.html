@@ -80,8 +80,11 @@ async function api(path, options={}) {
   return data;
 }
 
-  async function showSection(section) {
-    alert('Function reached: ' + section);
+  
+async function showSection(section) {
+  const requestId = (window.__adminSectionRequestId || 0) + 1;
+  window.__adminSectionRequestId = requestId;
+
   const endpoints = {
     overview: '/api/admin/overview',
     users: '/api/admin/users',
@@ -107,22 +110,29 @@ async function api(path, options={}) {
   };
 
   const output = document.getElementById('sectionContent');
-    alert('Panel found: ' + !!output);
-  document.getElementById('sectionTitle').textContent =
-    titles[section] || 'Admin Section';
+  const heading = document.getElementById('sectionTitle');
 
+  if (!output || !heading) return;
+
+  heading.textContent = titles[section] || 'Admin Section';
   output.textContent = 'Loading...';
 
   try {
-    alert('About to request: ' + endpoints[section]);
     const data = await api(endpoints[section]);
-    alert('API request completed');
-    console.log('SECTION DATA:', section, data);
-    output.textContent = 'Section: ' + section + '\nEndpoint: ' + endpoints[section] + '\nResponse: ' + JSON.stringify(data, null, 2);
+
+    if (requestId !== window.__adminSectionRequestId) return;
+
+    output.textContent =
+      'Section: ' + section +
+      '\nEndpoint: ' + endpoints[section] +
+      '\nResponse: ' + JSON.stringify(data, null, 2);
+
   } catch (error) {
+    if (requestId !== window.__adminSectionRequestId) return;
     output.textContent = 'Error: ' + error.message;
   }
 }
+
 async function loadDashboard() {
   try {
     const user = await api('/api/me');
