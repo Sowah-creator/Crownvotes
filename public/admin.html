@@ -27,6 +27,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
 <div id="login">
 <h2>Admin Login</h2>
   <p style="color:blue;font-weight:bold">ADMIN PAGE TEST</p>
+  <p style="color:green;font-weight:bold">JAVASCRIPT TEST: <span id="jsTest">NOT RUNNING</span></p>
 <form id="loginForm">
 <input id="email" type="email" placeholder="Admin email" required>
 <input id="password" type="password" placeholder="Admin password" required>
@@ -143,5 +144,6 @@ document.getElementById('logout').addEventListener('click', () => {
 
 if (token) loadDashboard();
 </script>
+document.getElementById('jsTest').textContent = 'RUNNING';
 </body>
 </html>
