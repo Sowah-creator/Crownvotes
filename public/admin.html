@@ -108,7 +108,8 @@ async function loadDashboard() {
 
 document.getElementById('loginForm').addEventListener('submit', async event => {
   event.preventDefault();
-  message.textContent = 'Signing in...';
+  message.style.color = 'blue';
+message.textContent = 'Signing in...';
 
   try {
     const result = await api('/api/auth/login', {
