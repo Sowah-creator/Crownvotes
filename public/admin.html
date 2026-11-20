@@ -118,7 +118,7 @@ async function api(path, options={}) {
     const data = await api(endpoints[section]);
     alert('API request completed');
     console.log('SECTION DATA:', section, data);
-    output.textContent = 'SUCCESS! Users section loaded. ' + JSON.stringify(data, null, 2);
+    output.textContent = 'Section: ' + section + '\nEndpoint: ' + endpoints[section] + '\nResponse: ' + JSON.stringify(data, null, 2);
   } catch (error) {
     output.textContent = 'Error: ' + error.message;
   }
