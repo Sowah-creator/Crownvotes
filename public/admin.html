@@ -146,35 +146,6 @@ async function loadDashboard() {
   }
 }
 
-    document.getElementById('login').classList.add('hidden');
-    document.getElementById('dashboard').classList.remove('hidden');
-    document.getElementById('welcome').textContent =
-      'Logged in as ' + (user.email || 'Administrator');
-
-    const results = await Promise.allSettled([
-      api('/api/admin/overview'),
-      api('/api/admin/events')
-    ]);
-
-    document.getElementById('overview').textContent =
-      results[0].status === 'fulfilled'
-        ? JSON.stringify(results[0].value, null, 2)
-        : results[0].reason.message;
-
-    document.getElementById('events').textContent =
-      results[1].status === 'fulfilled'
-        ? JSON.stringify(results[1].value, null, 2)
-        : results[1].reason.message;
-
-    message.textContent = '';
-  } catch (error) {
-    token = null;
-    localStorage.removeItem('crownvotes_admin_token');
-    document.getElementById('dashboard').classList.add('hidden');
-    document.getElementById('login').classList.remove('hidden');
-    message.textContent = error.message;
-  }
-}
 
 document.getElementById('loginForm').addEventListener('submit', async event => {
   event.preventDefault();
