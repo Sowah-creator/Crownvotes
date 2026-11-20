@@ -73,6 +73,59 @@ app.get('/api/admin/overview',auth,admin,(_,res)=>res.json({users:db.prepare('SE
 app.get('/api/admin/applications',auth,admin,(_,res)=>res.json(db.prepare('SELECT a.*,u.name,u.email FROM organiser_applications a JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC').all()));
 app.patch('/api/admin/applications/:id',auth,admin,(req,res)=>{const p=z.object({status:z.enum(['approved','rejected']),admin_note:z.string().max(1000).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Choose approved or rejected.'});const a=db.prepare('SELECT * FROM organiser_applications WHERE id=?').get(req.params.id);if(!a)return res.status(404).json({error:'Application not found.'});const tx=db.transaction(()=>{db.prepare('UPDATE organiser_applications SET status=?,admin_note=? WHERE id=?').run(p.data.status,p.data.admin_note||'',a.id);db.prepare('UPDATE users SET role=? WHERE id=?').run(p.data.status==='approved'?'organiser':'voter',a.user_id)});tx();audit(req.user,'organiser.application.reviewed','application',a.id,{status:p.data.status});res.json({status:p.data.status})});
 app.get('/api/admin/events',auth,admin,(_,res)=>res.json(db.prepare('SELECT e.*,u.name organiser FROM events e LEFT JOIN users u ON u.id=e.owner_id ORDER BY e.created_at DESC').all()));
+
+app.delete('/api/admin/events/:id', auth, admin, (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid event ID.' });
+  }
+
+  const event = eventById(id);
+
+  if (!event) {
+    return res.status(404).json({ error: 'Event not found.' });
+  }
+
+  const payments = db.prepare(
+    'SELECT COUNT(*) n FROM payments WHERE event_id=?'
+  ).get(id).n;
+
+  const votes = db.prepare(`
+    SELECT COUNT(*) n
+    FROM votes v
+    JOIN nominees n ON n.id=v.nominee_id
+    JOIN categories c ON c.id=n.category_id
+    WHERE c.event_id=?
+  `).get(id).n;
+
+  if (payments > 0 || votes > 0) {
+    return res.status(409).json({
+      error: 'This event has financial or voting records. Archive it instead of permanently deleting it.'
+    });
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      DELETE FROM nominees
+      WHERE category_id IN (
+        SELECT id FROM categories WHERE event_id=?
+      )
+    `).run(id);
+
+    db.prepare('DELETE FROM categories WHERE event_id=?').run(id);
+    db.prepare('DELETE FROM events WHERE id=?').run(id);
+  });
+
+  tx();
+
+  audit(req.user, 'event.deleted', 'event', id, {
+    title: event.title
+  });
+
+  res.json({ success: true, message: 'Event deleted successfully.' });
+});
+
 app.patch('/api/admin/events/:id/payment-approval',auth,admin,(req,res)=>{const p=z.object({payment_approval:z.enum(['pending','approved','rejected']),approval_note:z.string().max(1000).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Choose a valid payment approval status.'});if(p.data.payment_approval==='approved'&&(!p.data.approval_note||p.data.approval_note.trim().length<5))return res.status(400).json({error:'Record the provider approval reference and compliance review note before enabling paid voting.'});const e=eventById(req.params.id);if(!e)return res.status(404).json({error:'Event not found.'});db.prepare('UPDATE events SET payment_approval=?,approval_note=? WHERE id=?').run(p.data.payment_approval,p.data.approval_note||'',e.id);audit(req.user,'event.payment_approval.updated','event',e.id,{payment_approval:p.data.payment_approval,approval_note:p.data.approval_note||''});res.json(eventById(e.id))});
 app.patch('/api/admin/events/:id/commission',auth,admin,(req,res)=>{const p=z.object({commission_bps:z.number().int().min(0).max(3000)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Commission must be between 0% and 30%.'});const e=eventById(req.params.id);if(!e)return res.status(404).json({error:'Event not found.'});db.prepare('UPDATE events SET commission_bps=? WHERE id=?').run(p.data.commission_bps,e.id);audit(req.user,'event.commission.updated','event',e.id,{commission_bps:p.data.commission_bps});res.json({event_id:e.id,commission_bps:p.data.commission_bps})});
 app.patch('/api/admin/settings/commission',auth,admin,(req,res)=>{const p=z.object({default_commission_bps:z.number().int().min(0).max(3000)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Default commission must be between 0% and 30%.'});db.prepare('INSERT INTO platform_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('default_commission_bps',String(p.data.default_commission_bps));audit(req.user,'platform.commission.updated','setting','default_commission_bps',{default_commission_bps:p.data.default_commission_bps});res.json({default_commission_bps:p.data.default_commission_bps})});
