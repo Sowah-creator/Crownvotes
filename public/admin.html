@@ -114,7 +114,9 @@ async function api(path, options={}) {
   output.textContent = 'Loading...';
 
   try {
+    alert('About to request: ' + endpoints[section]);
     const data = await api(endpoints[section]);
+    alert('API request completed');
     console.log('SECTION DATA:', section, data);
     output.textContent = JSON.stringify(data, null, 2);
   } catch (error) {
