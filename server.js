@@ -1,148 +1,1348 @@
-import 'dotenv/config';
-import express from 'express';
-import helmet from 'helmet';
-import cors from 'cors';
-import rateLimit from 'express-rate-limit';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { randomUUID, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { z } from 'zod';
-import db from './db.js';
-import { calculateSplit } from './commission.js';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CrownVotes Admin</title>
 
-const app=express(); const PORT=process.env.PORT||3000;
-if(process.env.NODE_ENV==='production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length<32)) throw new Error('Set a strong JWT_SECRET (32+ characters) in production.');
-const JWT_SECRET=process.env.JWT_SECRET||'local-development-secret-change-before-deploy-123456';
-app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'","'unsafe-inline'"],styleSrc:["'self'","'unsafe-inline'",'https://fonts.googleapis.com'],fontSrc:["'self'",'https://fonts.gstatic.com'],imgSrc:["'self'",'data:','https:'],connectSrc:["'self'"],objectSrc:["'none'"],baseUri:["'self'"],frameAncestors:["'none'"]}}}));
-app.use(cors({origin:process.env.APP_BASE_URL ? process.env.APP_BASE_URL.split(',').map(x=>x.trim()) : (process.env.NODE_ENV==='production' ? false : true)}));
-app.use(express.json({limit:'1mb',verify:(req,res,buf)=>{req.rawBody=Buffer.from(buf)}}));
-app.use(express.static('public'));
-app.use('/api',rateLimit({windowMs:15*60*1000,limit:240}));
-const authLimit=rateLimit({windowMs:15*60*1000,limit:10});
-const paymentLimit=rateLimit({windowMs:15*60*1000,limit:30});
-const slugify=s=>s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
-const tokenFor=u=>jwt.sign({id:u.id},JWT_SECRET,{expiresIn:'12h'});
-function auth(req,res,next){try{const h=req.headers.authorization||'';const t=h.startsWith('Bearer ')?h.slice(7):'';const decoded=jwt.verify(t,JWT_SECRET);const u=db.prepare('SELECT id,name,email,role FROM users WHERE id=?').get(decoded.id);if(!u)return res.status(401).json({error:'Account not found.'});req.user=u;next()}catch{return res.status(401).json({error:'Please sign in.'})}}
-const allow=(...roles)=>(req,res,next)=>roles.includes(req.user.role)?next():res.status(403).json({error:'You do not have permission to do that.'});
-const admin=allow('admin'); const organiser=allow('organiser','admin');
-const setting=k=>db.prepare('SELECT value FROM platform_settings WHERE key=?').get(k)?.value;
-const money=n=>Math.round(Number(n));
-const eventById=id=>db.prepare('SELECT * FROM events WHERE id=?').get(id);
-const audit=(actor,action,type,id,details={})=>db.prepare('INSERT INTO audit_logs(actor_id,action,target_type,target_id,details) VALUES(?,?,?,?,?)').run(actor?.id||null,action,type,String(id),JSON.stringify(details));
-const eventIsInWindow=e=>{const now=Date.now();return (!e.starts_at||new Date(e.starts_at).getTime()<=now)&&(!e.ends_at||new Date(e.ends_at).getTime()>=now)};
-if(process.env.NODE_ENV==='production' && (!process.env.PAYOUT_DATA_KEY || process.env.PAYOUT_DATA_KEY.length<32)) throw new Error('Set a unique PAYOUT_DATA_KEY of at least 32 characters in production.');
-if(process.env.NODE_ENV==='production' && (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD.length<14)) throw new Error('Set ADMIN_EMAIL and an ADMIN_PASSWORD of at least 14 characters in production.');
-const payoutKey=createHash('sha256').update(process.env.PAYOUT_DATA_KEY || JWT_SECRET+'-local-payout-data').digest();
-function seal(value){const iv=randomBytes(12);const cipher=createCipheriv('aes-256-gcm',payoutKey,iv);const encrypted=Buffer.concat([cipher.update(String(value),'utf8'),cipher.final()]);return `enc:v1:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${encrypted.toString('base64')}`}
-function unseal(value){if(!String(value).startsWith('enc:v1:'))return value;const [, ,iv,tag,data]=String(value).split(':');const decipher=createDecipheriv('aes-256-gcm',payoutKey,Buffer.from(iv,'base64'));decipher.setAuthTag(Buffer.from(tag,'base64'));return Buffer.concat([decipher.update(Buffer.from(data,'base64')),decipher.final()]).toString('utf8')}
-app.get('/api/health',(_,res)=>res.json({ok:true,app:'CrownVotes',mode:process.env.NODE_ENV||'development'}));
-app.get('/api/admin-check',(_,res)=>{
-  const email=(process.env.ADMIN_EMAIL||'').trim().toLowerCase();
-  const u=email?db.prepare('SELECT role FROM users WHERE email=?').get(email):null;
-  res.json({
-    adminEmailConfigured:!!email,
-    adminAccountFound:!!u,
-    accountRole:u?.role||null
-  });
-});
-app.post('/api/auth/register',authLimit,(req,res)=>{const p=z.object({name:z.string().trim().min(2).max(80),email:z.string().email(),password:z.string().min(10).max(100)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Enter a valid name, email and password of at least 10 characters.'});try{const x=db.prepare('INSERT INTO users(name,email,password_hash) VALUES(?,?,?)').run(p.data.name,p.data.email.toLowerCase(),bcrypt.hashSync(p.data.password,12));const u=db.prepare('SELECT id,name,email,role FROM users WHERE id=?').get(x.lastInsertRowid);res.status(201).json({token:tokenFor(u),user:u})}catch{return res.status(409).json({error:'An account with that email already exists.'})}});
-app.post('/api/auth/login',authLimit,(req,res)=>{const p=z.object({email:z.string().email(),password:z.string().min(1)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Enter email and password.'});const u=db.prepare('SELECT * FROM users WHERE email=?').get(p.data.email.toLowerCase());if(!u||!bcrypt.compareSync(p.data.password,u.password_hash))return res.status(401).json({error:'Incorrect email or password.'});res.json({token:tokenFor(u),user:{id:u.id,name:u.name,email:u.email,role:u.role}})});
-app.get('/api/me',auth,(req,res)=>res.json(db.prepare('SELECT id,name,email,role,created_at FROM users WHERE id=?').get(req.user.id)));
+<style>
+* { box-sizing: border-box; }
 
-// Organiser onboarding and self-service dashboard.
-app.post('/api/organiser/apply',auth,(req,res)=>{const p=z.object({organisation:z.string().trim().min(2).max(120),phone:z.string().trim().min(9).max(20),details:z.string().max(1000).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Enter organisation name and a valid contact number.'});const old=db.prepare('SELECT * FROM organiser_applications WHERE user_id=?').get(req.user.id);if(old){if(old.status!=='rejected')return res.status(409).json({error:'You already have an organiser application.'});db.prepare("UPDATE organiser_applications SET organisation=?,phone=?,details=?,status='pending',admin_note='' WHERE id=?").run(p.data.organisation,p.data.phone,p.data.details||'',old.id);audit(req.user,'organiser.application.resubmitted','user',req.user.id,{organisation:p.data.organisation});return res.status(201).json({status:'pending',message:'Your organiser application has been resubmitted.'})}db.prepare('INSERT INTO organiser_applications(user_id,organisation,phone,details) VALUES(?,?,?,?)').run(req.user.id,p.data.organisation,p.data.phone,p.data.details||'');audit(req.user,'organiser.application.submitted','user',req.user.id,{organisation:p.data.organisation});res.status(201).json({status:'pending',message:'Your organiser application has been submitted for review.'})});
-app.get('/api/organiser/application',auth,(req,res)=>res.json(db.prepare('SELECT organisation,phone,details,status,admin_note,created_at FROM organiser_applications WHERE user_id=?').get(req.user.id)||null));
-app.get('/api/organiser/dashboard',auth,organiser,(req,res)=>{const totals=db.prepare(`SELECT COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END),0) gross,COALESCE(SUM(CASE WHEN status='paid' THEN platform_fee ELSE 0 END),0) fees,COALESCE(SUM(CASE WHEN status='paid' THEN organiser_net ELSE 0 END),0) earned FROM payments p JOIN events e ON p.event_id=e.id WHERE e.owner_id=?`).get(req.user.id);const paid=db.prepare("SELECT COALESCE(SUM(amount),0) n FROM payouts WHERE organiser_id=? AND status IN ('paid','processing')").get(req.user.id).n;const requested=db.prepare("SELECT COALESCE(SUM(amount),0) n FROM payouts WHERE organiser_id=? AND status='requested'").get(req.user.id).n;res.json({...totals,paid_out:paid,payouts_pending:requested,available:Math.max(0,totals.earned-paid-requested),events:db.prepare('SELECT id,title,slug,status,commission_bps,created_at FROM events WHERE owner_id=? ORDER BY created_at DESC').all(req.user.id),recent_payments:db.prepare("SELECT p.reference,p.amount,p.platform_fee,p.organiser_net,p.status,p.created_at,e.title event FROM payments p JOIN events e ON e.id=p.event_id WHERE e.owner_id=? ORDER BY p.created_at DESC LIMIT 20").all(req.user.id),payouts:db.prepare('SELECT id,amount,currency,status,reference,admin_note,created_at,processed_at FROM payouts WHERE organiser_id=? ORDER BY created_at DESC').all(req.user.id)})});
-app.post('/api/organiser/events',auth,organiser,(req,res)=>createEvent(req,res,req.user.id,req.user.role==='admin'));
-function createEvent(req,res,ownerId,isAdmin=false){const p=z.object({title:z.string().min(3).max(120),description:z.string().max(2000).optional(),starts_at:z.string().optional(),ends_at:z.string().optional(),vote_price:z.number().int().min(1).max(1000000),prize_structure:z.enum(['recognition','cash','material','mixed']).default('mixed'),status:z.enum(['draft','published']).default('draft'),commission_bps:z.number().int().min(0).max(3000).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Check event details. Vote price is in pesewas.'});if((p.data.starts_at&&!Number.isFinite(Date.parse(p.data.starts_at)))||(p.data.ends_at&&!Number.isFinite(Date.parse(p.data.ends_at))))return res.status(400).json({error:'Enter valid event start and end dates.'});if(p.data.starts_at&&p.data.ends_at&&Date.parse(p.data.ends_at)<=Date.parse(p.data.starts_at))return res.status(400).json({error:'Event end must be after its start.'});let slug=slugify(p.data.title)||`award-${Date.now()}`;if(db.prepare('SELECT id FROM events WHERE slug=?').get(slug))slug+=`-${Date.now()}`;const bps=isAdmin&&p.data.commission_bps!==undefined?p.data.commission_bps:Number(setting('default_commission_bps')??1000);const x=db.prepare('INSERT INTO events(title,slug,description,starts_at,ends_at,vote_price,status,prize_structure,payment_approval,owner_id,commission_bps) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(p.data.title,slug,p.data.description||'',p.data.starts_at||null,p.data.ends_at||null,p.data.vote_price,'draft',p.data.prize_structure,'pending',ownerId,bps);audit({id:ownerId},'event.created','event',x.lastInsertRowid,{commission_bps:bps,prize_structure:p.data.prize_structure});res.status(201).json(eventById(x.lastInsertRowid))}
-app.get('/api/organiser/events/:id',auth,organiser,(req,res)=>{const e=eventById(req.params.id);if(!e||(req.user.role!=='admin'&&e.owner_id!==req.user.id))return res.status(404).json({error:'Event not found.'});const categories=db.prepare('SELECT * FROM categories WHERE event_id=? ORDER BY id').all(e.id).map(c=>({...c,nominees:db.prepare('SELECT id,name,bio,image_url,vote_count FROM nominees WHERE category_id=? ORDER BY id').all(c.id).map(n=>({...n,short_code:`CV${String(n.id).padStart(4,'0')}`}))}));res.json({...e,categories})});
-app.patch('/api/organiser/events/:id',auth,organiser,(req,res)=>{const e=eventById(req.params.id);if(!e||(req.user.role!=='admin'&&e.owner_id!==req.user.id))return res.status(404).json({error:'Event not found.'});const p=z.object({title:z.string().min(3).max(120).optional(),description:z.string().max(2000).optional(),status:z.enum(['draft','published','closed']).optional(),vote_price:z.number().int().min(1).max(1000000).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Invalid event update.'});if(p.data.status==='published'&&db.prepare('SELECT COUNT(*) n FROM categories c JOIN nominees n ON n.category_id=c.id WHERE c.event_id=?').get(e.id).n<1)return res.status(400).json({error:'Add at least one nominee before publishing.'});const fields=[];const vals=[];for(const k of ['title','description','status','vote_price'])if(p.data[k]!==undefined){fields.push(`${k}=?`);vals.push(p.data[k])}if(fields.length)db.prepare(`UPDATE events SET ${fields.join(',')} WHERE id=?`).run(...vals,e.id);res.json(eventById(e.id))});
-app.patch('/api/organiser/events/:id/status',auth,organiser,(req,res)=>{const p=z.object({status:z.enum(['draft','published'])}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Choose draft or published.'});const e=eventById(req.params.id);if(!e||(req.user.role!=='admin'&&e.owner_id!==req.user.id))return res.status(404).json({error:'Event not found.'});if(p.data.status==='published'){const count=db.prepare('SELECT COUNT(*) n FROM categories c JOIN nominees n ON n.category_id=c.id WHERE c.event_id=?').get(e.id).n;if(count<1)return res.status(400).json({error:'Add at least one nominee before publishing.'})}db.prepare('UPDATE events SET status=? WHERE id=?').run(p.data.status,e.id);res.json(eventById(e.id))});
-app.post('/api/organiser/events/:id/categories',auth,organiser,(req,res)=>{const e=eventById(req.params.id);if(!e|| (req.user.role!=='admin'&&e.owner_id!==req.user.id))return res.status(404).json({error:'Event not found.'});const p=z.object({name:z.string().min(2).max(100),description:z.string().max(500).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Enter a category name.'});const x=db.prepare('INSERT INTO categories(event_id,name,description) VALUES(?,?,?)').run(e.id,p.data.name,p.data.description||'');res.status(201).json(db.prepare('SELECT * FROM categories WHERE id=?').get(x.lastInsertRowid))});
-app.post('/api/organiser/categories/:id/nominees',auth,organiser,(req,res)=>{const c=db.prepare('SELECT c.*,e.owner_id FROM categories c JOIN events e ON e.id=c.event_id WHERE c.id=?').get(req.params.id);if(!c||(req.user.role!=='admin'&&c.owner_id!==req.user.id))return res.status(404).json({error:'Category not found.'});const p=z.object({name:z.string().min(2).max(100),bio:z.string().max(1000).optional(),image_url:z.string().url().refine(v=>v.startsWith('https://'),'Use an HTTPS image URL.').optional().or(z.literal(''))}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Check nominee details.'});const x=db.prepare('INSERT INTO nominees(category_id,name,bio,image_url) VALUES(?,?,?,?)').run(c.id,p.data.name,p.data.bio||'',p.data.image_url||'');const nominee=db.prepare('SELECT * FROM nominees WHERE id=?').get(x.lastInsertRowid);res.status(201).json({...nominee,short_code:`CV${String(nominee.id).padStart(4,'0')}`})});
-app.patch('/api/organiser/nominees/:id',auth,organiser,(req,res)=>{const n=db.prepare('SELECT n.*,e.owner_id FROM nominees n JOIN categories c ON n.category_id=c.id JOIN events e ON c.event_id=e.id WHERE n.id=?').get(req.params.id);if(!n||(req.user.role!=='admin'&&n.owner_id!==req.user.id))return res.status(404).json({error:'Nominee not found.'});const p=z.object({name:z.string().min(2).max(100).optional(),bio:z.string().max(1000).optional(),image_url:z.string().url().optional().or(z.literal(''))}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Check nominee details.'});const keys=['name','bio','image_url'].filter(k=>p.data[k]!==undefined);if(keys.length)db.prepare(`UPDATE nominees SET ${keys.map(k=>k+'=?').join(',')} WHERE id=?`).run(...keys.map(k=>p.data[k]),n.id);audit(req.user,'nominee.updated','nominee',n.id,p.data);res.json(db.prepare('SELECT * FROM nominees WHERE id=?').get(n.id))});
-app.delete('/api/organiser/nominees/:id',auth,organiser,(req,res)=>{const n=db.prepare('SELECT n.*,e.owner_id FROM nominees n JOIN categories c ON n.category_id=c.id JOIN events e ON c.event_id=e.id WHERE n.id=?').get(req.params.id);if(!n||(req.user.role!=='admin'&&n.owner_id!==req.user.id))return res.status(404).json({error:'Nominee not found.'});if(db.prepare('SELECT COUNT(*) n FROM votes WHERE nominee_id=?').get(n.id).n>0)return res.status(409).json({error:'This nominee already has votes and cannot be deleted. You may update the profile instead.'});db.prepare('DELETE FROM nominees WHERE id=?').run(n.id);audit(req.user,'nominee.deleted','nominee',n.id);res.json({deleted:true})});
+body {
+  font-family: Arial, sans-serif;
+  background: #f4f5f9;
+  margin: 0;
+  padding: 15px;
+  color: #222;
+}
 
-app.get('/api/events',(_,res)=>res.json(db.prepare("SELECT id,title,slug,description,status,starts_at,ends_at,vote_price,currency,prize_structure,created_at,(SELECT COUNT(*) FROM categories c WHERE c.event_id=e.id) category_count FROM events e WHERE status='published' ORDER BY created_at DESC").all()));
-app.get('/api/events/:slug',(req,res)=>{const e=db.prepare("SELECT id,title,slug,description,starts_at,ends_at,vote_price,currency,prize_structure,payment_approval FROM events WHERE slug=? AND status='published'").get(req.params.slug);if(!e)return res.status(404).json({error:'Award event not found.'});const categories=db.prepare('SELECT * FROM categories WHERE event_id=?').all(e.id).map(c=>({...c,nominees:db.prepare('SELECT id,name,bio,image_url,vote_count FROM nominees WHERE category_id=? ORDER BY name').all(c.id).map(n=>({...n,short_code:`CV${String(n.id).padStart(4,'0')}`}))}));res.json({...e,categories})});
+.container {
+  max-width: 1200px;
+  margin: 20px auto;
+  background: white;
+  padding: 22px;
+  border-radius: 12px;
+  box-shadow: 0 3px 15px #0001;
+}
 
-app.get('/api/events/:slug/results',(req,res)=>{const e=db.prepare("SELECT id,title,status FROM events WHERE slug=? AND status='published'").get(req.params.slug);if(!e)return res.status(404).json({error:'Award event not found.'});const rows=db.prepare('SELECT c.name category,n.id nominee_id,n.name nominee,n.vote_count FROM categories c JOIN nominees n ON n.category_id=c.id WHERE c.event_id=? ORDER BY c.name,n.vote_count DESC,n.name').all(e.id);res.json({event:e.title,results:rows})});
+h1, h2, h3 { color: #35206d; }
 
-// Admin controls: approvals, organisers, event oversight, commission and financial reconciliation.
-app.get('/api/admin/overview',auth,admin,(_,res)=>res.json({users:db.prepare('SELECT COUNT(*) n FROM users').get().n,organisers:db.prepare("SELECT COUNT(*) n FROM users WHERE role='organiser'").get().n,events:db.prepare('SELECT COUNT(*) n FROM events').get().n,votes:db.prepare('SELECT COALESCE(SUM(quantity),0) n FROM votes').get().n,revenue:db.prepare("SELECT COALESCE(SUM(amount),0) n FROM payments WHERE status='paid'").get().n,platform_earnings:db.prepare("SELECT COALESCE(SUM(platform_fee),0) n FROM payments WHERE status='paid'").get().n,organiser_earnings:db.prepare("SELECT COALESCE(SUM(organiser_net),0) n FROM payments WHERE status='paid'").get().n,default_commission_bps:Number(setting('default_commission_bps')??1000)}));
-app.get('/api/admin/applications',auth,admin,(_,res)=>res.json(db.prepare('SELECT a.*,u.name,u.email FROM organiser_applications a JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC').all()));
-app.patch('/api/admin/applications/:id',auth,admin,(req,res)=>{const p=z.object({status:z.enum(['approved','rejected']),admin_note:z.string().max(1000).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Choose approved or rejected.'});const a=db.prepare('SELECT * FROM organiser_applications WHERE id=?').get(req.params.id);if(!a)return res.status(404).json({error:'Application not found.'});const tx=db.transaction(()=>{db.prepare('UPDATE organiser_applications SET status=?,admin_note=? WHERE id=?').run(p.data.status,p.data.admin_note||'',a.id);db.prepare('UPDATE users SET role=? WHERE id=?').run(p.data.status==='approved'?'organiser':'voter',a.user_id)});tx();audit(req.user,'organiser.application.reviewed','application',a.id,{status:p.data.status});res.json({status:p.data.status})});
-app.get('/api/admin/events',auth,admin,(_,res)=>res.json(db.prepare('SELECT e.*,u.name organiser FROM events e LEFT JOIN users u ON u.id=e.owner_id ORDER BY e.created_at DESC').all()));
+.hidden { display: none !important; }
 
-app.delete('/api/admin/events/:id', auth, admin, (req, res) => {
-  const id = Number(req.params.id);
+input, button, select, textarea {
+  font: inherit;
+}
 
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    return res.status(400).json({ error: 'Invalid event ID.' });
+input, select, textarea {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #ccc;
+  border-radius: 7px;
+  margin: 5px 0;
+}
+
+button {
+  background: #35206d;
+  color: white;
+  border: 0;
+  border-radius: 7px;
+  padding: 11px 14px;
+  margin: 4px 2px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button:hover { opacity: .88; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+button.secondary { background: #666; }
+button.success { background: #16834a; }
+button.danger { background: #b52b37; }
+button.warning { background: #a66b00; }
+
+#message {
+  color: #a12626;
+  overflow-wrap: anywhere;
+}
+
+.panel {
+  background: #f5f2fc;
+  padding: 15px;
+  margin: 14px 0;
+  border-radius: 9px;
+}
+
+.menu {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.menu button {
+  margin: 0;
+  min-height: 45px;
+}
+
+.menu button.active {
+  background: #6c4bb5;
+  outline: 2px solid #35206d;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 15px 0;
+}
+
+.stat-card {
+  background: white;
+  border-left: 4px solid #35206d;
+  padding: 16px;
+  border-radius: 9px;
+  box-shadow: 0 2px 8px #0001;
+  min-width: 0;
+}
+
+.stat-card p {
+  color: #666;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.stat-card h2 {
+  color: #35206d;
+  margin: 0;
+  font-size: 23px;
+  overflow-wrap: anywhere;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  background: white;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+
+.data-table {
+  width: 100%;
+  min-width: 650px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table th {
+  background: #35206d;
+  color: white;
+  padding: 13px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid #eee;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.data-table tr:hover { background: #f5f2fc; }
+
+.role-badge {
+  display: inline-block;
+  background: #eee8ff;
+  color: #35206d;
+  padding: 5px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.status-pending { background: #fff1cc; color: #805600; }
+.status-approved, .status-paid { background: #d9f5e4; color: #126b39; }
+.status-rejected, .status-failed { background: #ffe0e0; color: #a12626; }
+.status-processing { background: #dcecff; color: #174c87; }
+
+.section-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.section-tools input {
+  flex: 1;
+  min-width: 180px;
+}
+
+.small-note {
+  color: #666;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.empty {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  color: #666;
+  text-align: center;
+}
+
+.action-cell { min-width: 180px; }
+
+.action-cell button {
+  font-size: 11px;
+  padding: 8px;
+}
+
+.finance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.finance-card {
+  background: white;
+  padding: 14px;
+  border-radius: 8px;
+  border-left: 4px solid #35206d;
+}
+
+.finance-card span {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 7px;
+}
+
+.finance-card strong {
+  color: #35206d;
+  font-size: 20px;
+}
+
+#sectionContent {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+@media (max-width: 700px) {
+  .container { padding: 15px; margin: 5px auto; }
+  .menu { grid-template-columns: repeat(2, 1fr); }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 400px) {
+  .stats-grid, .finance-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+  <h1>CrownVotes Admin</h1>
+  <p>Administrator control panel</p>
+
+  <!-- LOGIN -->
+  <div id="login">
+    <p id="message"></p>
+    <h2>Admin Login</h2>
+
+    <form id="loginForm">
+      <input id="email" type="email" placeholder="Admin email" required>
+      <input id="password" type="password" placeholder="Admin password" required>
+      <button type="submit" id="loginButton">Login</button>
+    </form>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="dashboard" class="hidden">
+
+    <h2>Admin Control Centre</h2>
+    <p id="welcome"></p>
+
+    <!-- OVERVIEW CARDS -->
+    <div id="statsGrid" class="stats-grid hidden">
+
+      <div class="stat-card">
+        <p>Total Users</p>
+        <h2 id="statUsers">0</h2>
+      </div>
+
+      <div class="stat-card">
+        <p>Total Organisers</p>
+        <h2 id="statOrganisers">0</h2>
+      </div>
+
+      <div class="stat-card">
+        <p>Total Events</p>
+        <h2 id="statEvents">0</h2>
+      </div>
+
+      <div class="stat-card">
+        <p>Total Votes</p>
+        <h2 id="statVotes">0</h2>
+      </div>
+
+      <div class="stat-card">
+        <p>Gross Revenue</p>
+        <h2 id="statRevenue">GHS 0</h2>
+      </div>
+
+      <div class="stat-card">
+        <p>Platform Earnings</p>
+        <h2 id="statEarnings">GHS 0</h2>
+      </div>
+
+    </div>
+
+    <!-- MANAGEMENT MENU -->
+    <div class="panel">
+      <h3>Management Menu</h3>
+
+      <div class="menu" id="managementMenu">
+        <button type="button" data-section="overview">Overview</button>
+        <button type="button" data-section="users">Users</button>
+        <button type="button" data-section="applications">Applications</button>
+        <button type="button" data-section="events">Events</button>
+        <button type="button" data-section="finance">Finance</button>
+        <button type="button" data-section="payouts">Payouts</button>
+        <button type="button" data-section="results">Results</button>
+        <button type="button" data-section="audit-logs">Audit Logs</button>
+      </div>
+    </div>
+
+    <!-- SECTION DISPLAY -->
+    <div class="panel">
+      <h3 id="sectionTitle">Overview</h3>
+
+      <div id="sectionContent">Loading...</div>
+
+      <button type="button" id="refresh">Refresh Section</button>
+    </div>
+
+    <button type="button" id="logout" class="danger">Logout</button>
+
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* =========================
+   GLOBAL VARIABLES
+========================= */
+
+const message = document.getElementById('message');
+
+let token = localStorage.getItem('crownvotes_admin_token');
+let currentSection = 'overview';
+let requestId = 0;
+
+const endpoints = {
+  overview: '/api/admin/overview',
+  users: '/api/admin/users',
+  applications: '/api/admin/applications',
+  events: '/api/admin/events',
+  finance: '/api/admin/finance',
+  payouts: '/api/admin/finance',
+  results: '/api/admin/results',
+  'audit-logs': '/api/admin/audit-logs'
+};
+
+const titles = {
+  overview: 'Overview',
+  users: 'Users',
+  applications: 'Organiser Applications',
+  events: 'Events',
+  finance: 'Finance',
+  payouts: 'Payouts',
+  results: 'Election Results',
+  'audit-logs': 'Audit Logs'
+};
+
+
+/* =========================
+   HELPER FUNCTIONS
+========================= */
+
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[character]);
+}
+
+function money(value, currency = 'GHS') {
+  return currency + ' ' + (Number(value || 0) / 100).toLocaleString(
+    undefined,
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+  );
+}
+
+function date(value) {
+  if (!value) return '—';
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
   }
 
-  const event = eventById(id);
+  return parsed.toLocaleString();
+}
 
-  if (!event) {
-    return res.status(404).json({ error: 'Event not found.' });
-  }
+function badge(value) {
+  const status = String(value || 'unknown');
+  const css = 'status-' + status.toLowerCase().replace(/[^a-z0-9_-]/g, '');
 
-  const payments = db.prepare(
-    'SELECT COUNT(*) n FROM payments WHERE event_id=?'
-  ).get(id).n;
+  return `<span class="role-badge ${escapeHTML(css)}">${escapeHTML(status)}</span>`;
+}
 
-  const votes = db.prepare(`
-    SELECT COUNT(*) n
-    FROM votes v
-    JOIN nominees n ON n.id=v.nominee_id
-    JOIN categories c ON c.id=n.category_id
-    WHERE c.event_id=?
-  `).get(id).n;
+function emptyMessage(text) {
+  return `<div class="empty">${escapeHTML(text)}</div>`;
+}
 
-  if (payments > 0 || votes > 0) {
-    return res.status(409).json({
-      error: 'This event has financial or voting records. Archive it instead of permanently deleting it.'
-    });
-  }
+function table(headers, rows) {
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>${headers.map(h => `<th>${escapeHTML(h)}</th>`).join('')}</tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
 
-  const tx = db.transaction(() => {
-    db.prepare(`
-      DELETE FROM nominees
-      WHERE category_id IN (
-        SELECT id FROM categories WHERE event_id=?
-      )
-    `).run(id);
+function searchBox(placeholder = 'Search this table...') {
+  return `
+    <div class="section-tools">
+      <input type="search" class="table-search"
+        placeholder="${escapeHTML(placeholder)}">
+    </div>
+  `;
+}
 
-    db.prepare('DELETE FROM categories WHERE event_id=?').run(id);
-    db.prepare('DELETE FROM events WHERE id=?').run(id);
+function filterTable(input) {
+  const panel = input.closest('#sectionContent');
+  if (!panel) return;
+
+  const query = input.value.toLowerCase();
+  const rows = panel.querySelectorAll('.data-table tbody tr');
+
+  rows.forEach(row => {
+    row.style.display = row.textContent.toLowerCase().includes(query)
+      ? ''
+      : 'none';
+  });
+}
+
+
+/* =========================
+   API REQUEST FUNCTION
+========================= */
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
+      ...(options.headers || {})
+    }
   });
 
-  tx();
+  const data = await response.json().catch(() => ({}));
 
-  audit(req.user, 'event.deleted', 'event', id, {
-    title: event.title
+  if (!response.ok) {
+    throw new Error(data.error || 'Request failed. HTTP ' + response.status);
+  }
+
+  return data;
+}
+
+
+/* =========================
+   OVERVIEW
+========================= */
+
+function renderOverview(data) {
+  document.getElementById('statsGrid').classList.remove('hidden');
+
+  document.getElementById('statUsers').textContent =
+    Number(data.users || 0).toLocaleString();
+
+  document.getElementById('statOrganisers').textContent =
+    Number(data.organisers || 0).toLocaleString();
+
+  document.getElementById('statEvents').textContent =
+    Number(data.events || 0).toLocaleString();
+
+  document.getElementById('statVotes').textContent =
+    Number(data.votes || 0).toLocaleString();
+
+  document.getElementById('statRevenue').textContent =
+    money(data.revenue);
+
+  document.getElementById('statEarnings').textContent =
+    money(data.platform_earnings);
+
+  const percent = Number(data.default_commission_bps || 0) / 100;
+
+  document.getElementById('sectionContent').innerHTML = `
+    <h3>Platform Summary</h3>
+    <p>Your CrownVotes platform statistics are displayed above.</p>
+
+    <div class="finance-grid">
+      <div class="finance-card">
+        <span>Organiser Earnings</span>
+        <strong>${escapeHTML(money(data.organiser_earnings))}</strong>
+      </div>
+
+      <div class="finance-card">
+        <span>Default Commission</span>
+        <strong>${escapeHTML(percent)}%</strong>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Update Default Commission</h3>
+      <p class="small-note">
+        Enter a percentage between 0 and 30. This setting applies
+        to newly created events unless a different commission is set.
+      </p>
+
+      <input id="defaultCommission" type="number"
+        min="0" max="30" step="0.01"
+        value="${escapeHTML(percent)}">
+
+      <button type="button" data-action="save-default-commission">
+        Save Commission
+      </button>
+    </div>
+  `;
+}
+
+
+/* =========================
+   USERS
+========================= */
+
+function renderUsers(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return emptyMessage('No registered users found.');
+  }
+
+  const rows = data.map(user => `
+    <tr>
+      <td>${escapeHTML(user.id)}</td>
+      <td>${escapeHTML(user.name)}</td>
+      <td>${escapeHTML(user.email)}</td>
+      <td>${badge(user.role)}</td>
+      <td>${escapeHTML(date(user.created_at))}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <p>Registered users: <strong>${data.length}</strong></p>
+    ${searchBox('Search users by name, email or role...')}
+    ${table(
+      ['ID', 'Name', 'Email', 'Role', 'Registration Date'],
+      rows
+    )}
+  `;
+}
+
+
+/* =========================
+   ORGANISER APPLICATIONS
+========================= */
+
+function renderApplications(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return emptyMessage('No organiser applications found.');
+  }
+
+  const rows = data.map(application => `
+    <tr>
+      <td>${escapeHTML(application.id)}</td>
+      <td>${escapeHTML(application.name)}</td>
+      <td>${escapeHTML(application.email)}</td>
+      <td>${escapeHTML(application.organisation)}</td>
+      <td>${escapeHTML(application.phone)}</td>
+      <td>${badge(application.status || 'pending')}</td>
+      <td>${escapeHTML(application.admin_note || '—')}</td>
+      <td>${escapeHTML(date(application.created_at))}</td>
+
+      <td class="action-cell">
+        <button class="success" type="button"
+          data-action="application-review"
+          data-id="${escapeHTML(application.id)}"
+          data-status="approved">Approve</button>
+
+        <button class="danger" type="button"
+          data-action="application-review"
+          data-id="${escapeHTML(application.id)}"
+          data-status="rejected">Reject</button>
+      </td>
+    </tr>
+  `).join('');
+
+  return `
+    <p>Applications: <strong>${data.length}</strong></p>
+    ${searchBox('Search applications...')}
+    ${table(
+      [
+        'ID', 'Applicant', 'Email', 'Organisation',
+        'Phone', 'Status', 'Admin Note', 'Submitted', 'Actions'
+      ],
+      rows
+    )}
+  `;
+}
+
+
+/* =========================
+   EVENTS
+========================= */
+
+function renderEvents(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return emptyMessage('No events have been created yet.');
+  }
+
+  const rows = data.map(event => `
+    <tr>
+      <td>${escapeHTML(event.id)}</td>
+      <td>
+        <strong>${escapeHTML(event.title)}</strong>
+        <br>
+        <span class="small-note">${escapeHTML(event.slug)}</span>
+      </td>
+      <td>${escapeHTML(event.organiser || '—')}</td>
+      <td>${badge(event.status)}</td>
+      <td>${escapeHTML(event.payment_approval || 'pending')}</td>
+      <td>${escapeHTML(money(event.vote_price, event.currency || 'GHS'))}</td>
+      <td>${escapeHTML(Number(event.commission_bps || 0) / 100)}%</td>
+      <td>${escapeHTML(date(event.created_at))}</td>
+
+      <td class="action-cell">
+        <button type="button" class="secondary"
+          data-action="event-status"
+          data-id="${escapeHTML(event.id)}"
+          data-status="${event.status === 'published' ? 'draft' : 'published'}">
+          ${event.status === 'published' ? 'Set Draft' : 'Publish'}
+        </button>
+
+        <button type="button" class="warning"
+          data-action="event-payment"
+          data-id="${escapeHTML(event.id)}">
+          Payment Approval
+        </button>
+
+        <button type="button"
+          data-action="event-commission"
+          data-id="${escapeHTML(event.id)}"
+          data-commission="${escapeHTML(Number(event.commission_bps || 0) / 100)}">
+          Commission
+        </button>
+
+        <button type="button" class="danger"
+          data-action="event-delete"
+          data-id="${escapeHTML(event.id)}">
+          Delete
+        </button>
+      </td>
+    </tr>
+  `).join('');
+
+  return `
+    <p>Total events: <strong>${data.length}</strong></p>
+    <p class="small-note">
+      Publishing requires at least one nominee. Events with voting or
+      payment records cannot be permanently deleted.
+    </p>
+    ${searchBox('Search events by title, organiser or status...')}
+    ${table(
+      [
+        'ID', 'Event', 'Organiser', 'Status',
+        'Payment Approval', 'Vote Price', 'Commission',
+        'Created', 'Management'
+      ],
+      rows
+    )}
+  `;
+}
+
+
+/* =========================
+   FINANCE
+========================= */
+
+function renderFinance(data) {
+  const transactions = Array.isArray(data.transactions)
+    ? data.transactions
+    : [];
+
+  const rows = transactions.map(payment => `
+    <tr>
+      <td>${escapeHTML(payment.reference)}</td>
+      <td>${escapeHTML(payment.event)}</td>
+      <td>${escapeHTML(payment.organiser || '—')}</td>
+      <td>${escapeHTML(money(payment.amount, payment.currency || 'GHS'))}</td>
+      <td>${escapeHTML(payment.platform_fee == null ? '—' : money(payment.platform_fee, payment.currency || 'GHS'))}</td>
+      <td>${escapeHTML(payment.organiser_net == null ? '—' : money(payment.organiser_net, payment.currency || 'GHS'))}</td>
+      <td>${escapeHTML(payment.provider || '—')}</td>
+      <td>${badge(payment.status)}</td>
+      <td>${escapeHTML(date(payment.settled_at || payment.created_at))}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <h3>Financial Summary</h3>
+
+    <div class="finance-grid">
+      <div class="finance-card">
+        <span>Gross Revenue</span>
+        <strong>${escapeHTML(money(data.gross))}</strong>
+      </div>
+
+      <div class="finance-card">
+        <span>Platform Fees</span>
+        <strong>${escapeHTML(money(data.platform_fees))}</strong>
+      </div>
+
+      <div class="finance-card">
+        <span>Organiser Net Earnings</span>
+        <strong>${escapeHTML(money(data.organiser_net))}</strong>
+      </div>
+
+      <div class="finance-card">
+        <span>Payouts Requested</span>
+        <strong>${escapeHTML(money(data.payouts_requested))}</strong>
+      </div>
+
+      <div class="finance-card">
+        <span>Payouts Paid</span>
+        <strong>${escapeHTML(money(data.payouts_paid))}</strong>
+      </div>
+    </div>
+
+    <h3>Paid Transactions</h3>
+
+    ${transactions.length
+      ? searchBox('Search transactions...')
+      : emptyMessage('No paid transactions yet.')}
+
+    ${transactions.length
+      ? table(
+          [
+            'Reference', 'Event', 'Organiser', 'Gross',
+            'Platform Fee', 'Organiser Net', 'Provider',
+            'Status', 'Settled'
+          ],
+          rows
+        )
+      : ''
+    }
+  `;
+}
+
+
+/* =========================
+   PAYOUTS
+========================= */
+
+function renderPayouts(data) {
+  const payouts = Array.isArray(data.payouts) ? data.payouts : [];
+
+  if (payouts.length === 0) {
+    return emptyMessage('No payout requests found.');
+  }
+
+  const rows = payouts.map(payout => `
+    <tr>
+      <td>${escapeHTML(payout.id)}</td>
+      <td>${escapeHTML(payout.organiser || '—')}</td>
+      <td>${escapeHTML(payout.email || '—')}</td>
+      <td>${escapeHTML(money(payout.amount, payout.currency || 'GHS'))}</td>
+      <td>${escapeHTML(payout.destination || '—')}</td>
+      <td>${escapeHTML(payout.reference || '—')}</td>
+      <td>${badge(payout.status)}</td>
+      <td>${escapeHTML(payout.admin_note || '—')}</td>
+      <td>${escapeHTML(date(payout.created_at))}</td>
+
+      <td class="action-cell">
+        <button type="button" class="secondary"
+          data-action="payout-status"
+          data-id="${escapeHTML(payout.id)}"
+          data-status="processing">Processing</button>
+
+        <button type="button" class="success"
+          data-action="payout-status"
+          data-id="${escapeHTML(payout.id)}"
+          data-status="paid">Mark Paid</button>
+
+        <button type="button" class="danger"
+          data-action="payout-status"
+          data-id="${escapeHTML(payout.id)}"
+          data-status="rejected">Reject</button>
+      </td>
+    </tr>
+  `).join('');
+
+  return `
+    <p>Total payout requests: <strong>${payouts.length}</strong></p>
+    <p class="small-note">
+      The payout destination is sensitive financial information.
+      Mark a payout as paid only after completing the transfer and
+      entering its bank or Mobile Money reference.
+    </p>
+
+    ${searchBox('Search payouts...')}
+
+    ${table(
+      [
+        'ID', 'Organiser', 'Email', 'Amount', 'Destination',
+        'Reference', 'Status', 'Admin Note', 'Requested', 'Actions'
+      ],
+      rows
+    )}
+  `;
+}
+
+
+/* =========================
+   ELECTION RESULTS
+========================= */
+
+function renderResults(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return emptyMessage('No election results available yet.');
+  }
+
+  const rows = data.map(result => `
+    <tr>
+      <td>${escapeHTML(result.event)}</td>
+      <td>${escapeHTML(result.category)}</td>
+      <td>${escapeHTML(result.nominee_id)}</td>
+      <td>${escapeHTML(result.nominee)}</td>
+      <td><strong>${Number(result.vote_count || 0).toLocaleString()}</strong></td>
+    </tr>
+  `).join('');
+
+  return `
+    <p>Nominee result records: <strong>${data.length}</strong></p>
+    ${searchBox('Search events, categories or nominees...')}
+    ${table(
+      ['Event', 'Category', 'Nominee ID', 'Nominee', 'Votes'],
+      rows
+    )}
+  `;
+}
+
+
+/* =========================
+   AUDIT LOGS
+========================= */
+
+function renderAuditLogs(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return emptyMessage('No administrator activity has been recorded yet.');
+  }
+
+  const rows = data.map(log => `
+    <tr>
+      <td>${escapeHTML(log.id)}</td>
+      <td>${escapeHTML(log.actor_name || 'System')}</td>
+      <td>${escapeHTML(log.actor_email || '—')}</td>
+      <td>${escapeHTML(log.action)}</td>
+      <td>${escapeHTML(log.target_type)}</td>
+      <td>${escapeHTML(log.target_id)}</td>
+      <td>${escapeHTML(log.details || '—')}</td>
+      <td>${escapeHTML(date(log.created_at))}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <p>Activity records: <strong>${data.length}</strong></p>
+    ${searchBox('Search audit logs...')}
+    ${table(
+      [
+        'ID', 'Administrator', 'Email', 'Action',
+        'Target Type', 'Target ID', 'Details', 'Date'
+      ],
+      rows
+    )}
+  `;
+}
+
+
+/* =========================
+   SECTION NAVIGATION
+========================= */
+
+async function showSection(section) {
+  if (!endpoints[section]) return;
+
+  currentSection = section;
+  const thisRequest = ++requestId;
+
+  const output = document.getElementById('sectionContent');
+  const heading = document.getElementById('sectionTitle');
+  const statsGrid = document.getElementById('statsGrid');
+
+  heading.textContent = titles[section];
+  output.textContent = 'Loading ' + titles[section] + '...';
+
+  document.querySelectorAll('#managementMenu button').forEach(button => {
+    button.classList.toggle(
+      'active',
+      button.dataset.section === section
+    );
   });
 
-  res.json({ success: true, message: 'Event deleted successfully.' });
-});
+  try {
+    const data = await api(endpoints[section]);
 
-app.patch('/api/admin/events/:id/payment-approval',auth,admin,(req,res)=>{const p=z.object({payment_approval:z.enum(['pending','approved','rejected']),approval_note:z.string().max(1000).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Choose a valid payment approval status.'});if(p.data.payment_approval==='approved'&&(!p.data.approval_note||p.data.approval_note.trim().length<5))return res.status(400).json({error:'Record the provider approval reference and compliance review note before enabling paid voting.'});const e=eventById(req.params.id);if(!e)return res.status(404).json({error:'Event not found.'});db.prepare('UPDATE events SET payment_approval=?,approval_note=? WHERE id=?').run(p.data.payment_approval,p.data.approval_note||'',e.id);audit(req.user,'event.payment_approval.updated','event',e.id,{payment_approval:p.data.payment_approval,approval_note:p.data.approval_note||''});res.json(eventById(e.id))});
-app.patch('/api/admin/events/:id/commission',auth,admin,(req,res)=>{const p=z.object({commission_bps:z.number().int().min(0).max(3000)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Commission must be between 0% and 30%.'});const e=eventById(req.params.id);if(!e)return res.status(404).json({error:'Event not found.'});db.prepare('UPDATE events SET commission_bps=? WHERE id=?').run(p.data.commission_bps,e.id);audit(req.user,'event.commission.updated','event',e.id,{commission_bps:p.data.commission_bps});res.json({event_id:e.id,commission_bps:p.data.commission_bps})});
-app.patch('/api/admin/settings/commission',auth,admin,(req,res)=>{const p=z.object({default_commission_bps:z.number().int().min(0).max(3000)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Default commission must be between 0% and 30%.'});db.prepare('INSERT INTO platform_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('default_commission_bps',String(p.data.default_commission_bps));audit(req.user,'platform.commission.updated','setting','default_commission_bps',{default_commission_bps:p.data.default_commission_bps});res.json({default_commission_bps:p.data.default_commission_bps})});
-app.get('/api/admin/finance',auth,admin,(_,res)=>res.json({gross:db.prepare("SELECT COALESCE(SUM(amount),0) n FROM payments WHERE status='paid'").get().n,platform_fees:db.prepare("SELECT COALESCE(SUM(platform_fee),0) n FROM payments WHERE status='paid'").get().n,organiser_net:db.prepare("SELECT COALESCE(SUM(organiser_net),0) n FROM payments WHERE status='paid'").get().n,payouts_requested:db.prepare("SELECT COALESCE(SUM(amount),0) n FROM payouts WHERE status='requested'").get().n,payouts_paid:db.prepare("SELECT COALESCE(SUM(amount),0) n FROM payouts WHERE status='paid'").get().n,transactions:db.prepare("SELECT p.*,e.title event,u.name organiser FROM payments p JOIN events e ON e.id=p.event_id LEFT JOIN users u ON u.id=e.owner_id WHERE p.status='paid' ORDER BY p.settled_at DESC LIMIT 100").all(),payouts:db.prepare('SELECT p.*,u.name organiser,u.email FROM payouts p JOIN users u ON u.id=p.organiser_id ORDER BY p.created_at DESC LIMIT 100').all().map(p=>({...p,destination:unseal(p.destination)}))}));
-app.patch('/api/admin/payouts/:id',auth,admin,(req,res)=>{const p=z.object({status:z.enum(['processing','paid','rejected']),admin_note:z.string().max(1000).optional()}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Invalid payout status.'});if(p.data.status==='paid'&&(!p.data.admin_note||p.data.admin_note.trim().length<5))return res.status(400).json({error:'Enter the completed bank/MoMo transfer reference before marking this payout as paid.'});const x=db.prepare('SELECT * FROM payouts WHERE id=?').get(req.params.id);if(!x)return res.status(404).json({error:'Payout not found.'});db.prepare('UPDATE payouts SET status=?,admin_note=?,processed_at=CASE WHEN ? IN (\'paid\',\'rejected\') THEN CURRENT_TIMESTAMP ELSE processed_at END WHERE id=?').run(p.data.status,p.data.admin_note||'',p.data.status,x.id);audit(req.user,'payout.status.updated','payout',x.reference,{status:p.data.status,note:p.data.admin_note||''});res.json({status:p.data.status})});
-app.get('/api/admin/users',auth,admin,(_,res)=>res.json(db.prepare('SELECT id,name,email,role,created_at FROM users ORDER BY created_at DESC LIMIT 500').all()));
-app.get('/api/admin/audit-logs',auth,admin,(_,res)=>res.json(db.prepare('SELECT a.*,u.name actor_name,u.email actor_email FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC LIMIT 250').all()));
-app.get('/api/admin/results',auth,admin,(_,res)=>res.json(db.prepare('SELECT e.title event,c.name category,n.id nominee_id,n.name nominee,n.vote_count FROM nominees n JOIN categories c ON n.category_id=c.id JOIN events e ON c.event_id=e.id ORDER BY e.title,c.name,n.vote_count DESC').all()));
+    if (thisRequest !== requestId) return;
 
-// Payment flow: amounts are pesewas. Fee split is frozen at checkout, and applied only once after verified success.
-app.post('/api/payments/initialize',auth,paymentLimit,async(req,res)=>{const p=z.object({nominee_id:z.number().int().positive(),quantity:z.number().int().min(1).max(10000),phone:z.string().min(9).max(20),provider:z.enum(['mtn','vod','atl']).default('mtn')}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Enter valid nominee, quantity, phone and network.'});const n=db.prepare('SELECT n.id,c.event_id,e.vote_price,e.currency,e.status,e.payment_approval,e.commission_bps,e.owner_id,e.slug FROM nominees n JOIN categories c ON n.category_id=c.id JOIN events e ON e.id=c.event_id WHERE n.id=?').get(p.data.nominee_id);if(!n||n.status!=='published')return res.status(404).json({error:'Nominee is not accepting votes.'});const eventForVote=eventById(n.event_id);if(!eventForVote||!eventIsInWindow(eventForVote))return res.status(403).json({error:'This event is not currently accepting votes.'});if(process.env.NODE_ENV==='production'&&(process.env.PAYMENT_PROVIDER||'mock')==='mock')return res.status(503).json({error:'Live payments are not enabled. CrownVotes is in a non-collecting deployment mode until provider approval and live credentials are configured.'});if(n.payment_approval!=='approved')return res.status(403).json({error:'Paid voting is locked until this event has the required payment-provider and compliance approval.'});if(n.owner_id==null)return res.status(403).json({error:'This event has no organiser assigned. Contact support.'});const gross=money(n.vote_price*p.data.quantity);if(!Number.isSafeInteger(gross)||gross<=0||gross>100000000)return res.status(400).json({error:'Vote total exceeds the allowed transaction limit.'});const split=calculateSplit(gross,n.commission_bps);const fee=split.platformFee;const net=split.organiserNet;const reference=`CV-${randomUUID()}`;const provider=process.env.PAYMENT_PROVIDER||'mock';db.prepare('INSERT INTO payments(user_id,reference,provider,amount,currency,metadata,event_id,nominee_id,quantity,phone,network,platform_fee,organiser_net) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(req.user.id,reference,provider,gross,n.currency,JSON.stringify({nominee_id:n.id,quantity:p.data.quantity,event_id:n.event_id}),n.event_id,n.id,p.data.quantity,p.data.phone,p.data.provider,fee,net);if(provider==='paystack'){if(!process.env.PAYMENT_SECRET){db.prepare("UPDATE payments SET status='failed' WHERE reference=?").run(reference);return res.status(503).json({error:'Payment gateway is not configured.'})}try{const r=await fetch('https://api.paystack.co/charge',{method:'POST',headers:{Authorization:`Bearer ${process.env.PAYMENT_SECRET}`,'Content-Type':'application/json'},body:JSON.stringify({email:req.user.email,amount:gross,currency:'GHS',reference,mobile_money:{phone:p.data.phone,provider:p.data.provider}})});const d=await r.json();if(!r.ok||!d.status){db.prepare("UPDATE payments SET status='failed' WHERE reference=?").run(reference);return res.status(502).json({error:d.message||'Could not start payment.'})}return res.status(201).json({reference,amount:gross,currency:n.currency,platform_fee:fee,organiser_net:net,status:'pending',message:d.data?.display_text||'Approve the Mobile Money prompt. Votes count only after verification.'})}catch{db.prepare("UPDATE payments SET status='failed' WHERE reference=?").run(reference);return res.status(502).json({error:'Payment provider unavailable.'})}}audit(req.user,'payment.initialized','payment',reference,{event_id:n.event_id,nominee_id:n.id,quantity:p.data.quantity,gross,platform_fee:fee,organiser_net:net});res.status(201).json({reference,amount:gross,currency:n.currency,platform_fee:fee,organiser_net:net,status:'pending',message:'Demo only: no real money collected. Confirm in development to test the split.'})});
-function settlePayment(payment,verified){if(!verified)return;const tx=db.transaction(()=>{const cur=db.prepare('SELECT * FROM payments WHERE id=?').get(payment.id);if(!cur||cur.status==='paid')return;db.prepare("UPDATE payments SET status='paid',settled_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'").run(cur.id);const now=db.prepare('SELECT status FROM payments WHERE id=?').get(cur.id);if(now.status!=='paid')return;if(!db.prepare('SELECT id FROM votes WHERE payment_id=?').get(cur.id)){db.prepare('INSERT INTO votes(payment_id,user_id,nominee_id,quantity) VALUES(?,?,?,?)').run(cur.id,cur.user_id,cur.nominee_id,cur.quantity);db.prepare('UPDATE nominees SET vote_count=vote_count+? WHERE id=?').run(cur.quantity,cur.nominee_id)}});tx()}
-app.post('/api/payments/paystack-webhook',async(req,res)=>{const sig=req.headers['x-paystack-signature'];const secret=process.env.PAYMENT_SECRET;if(!secret||!sig||!req.rawBody)return res.sendStatus(400);const expected=createHmac('sha512',secret).update(req.rawBody).digest('hex');try{if(!timingSafeEqual(Buffer.from(sig,'hex'),Buffer.from(expected,'hex')))return res.sendStatus(401)}catch{return res.sendStatus(401)}if(req.body.event!=='charge.success')return res.sendStatus(200);const ref=req.body.data?.reference;const p=db.prepare("SELECT * FROM payments WHERE reference=? AND provider='paystack'").get(ref);if(!p)return res.sendStatus(200);try{const r=await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(ref)}`,{headers:{Authorization:`Bearer ${secret}`}});const d=await r.json();if(r.ok&&d.status&&d.data?.status==='success'&&d.data.amount===p.amount&&d.data.currency===p.currency)settlePayment(p,true)}catch{return res.sendStatus(500)}res.sendStatus(200)});
-app.get('/api/payments/status/:reference',auth,async(req,res)=>{let p=db.prepare('SELECT * FROM payments WHERE reference=? AND user_id=?').get(req.params.reference,req.user.id);if(!p)return res.status(404).json({error:'Payment not found.'});if(p.status==='pending'&&p.provider==='paystack'&&process.env.PAYMENT_SECRET){try{const vr=await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(p.reference)}`,{headers:{Authorization:`Bearer ${process.env.PAYMENT_SECRET}`}});const vd=await vr.json();if(vr.ok&&vd.status&&vd.data?.status==='success'&&vd.data.amount===p.amount&&vd.data.currency===p.currency){settlePayment(p,true);p=db.prepare('SELECT * FROM payments WHERE id=?').get(p.id)}}catch{}}res.json({reference:p.reference,status:p.status,amount:p.amount,currency:p.currency,platform_fee:p.platform_fee,organiser_net:p.organiser_net})});
-app.post('/api/payments/mock-confirm/:reference',auth,(req,res)=>{if(process.env.NODE_ENV==='production'||process.env.PAYMENT_PROVIDER!=='mock')return res.sendStatus(404);const p=db.prepare('SELECT * FROM payments WHERE reference=? AND user_id=?').get(req.params.reference,req.user.id);if(!p)return res.status(404).json({error:'Payment not found.'});settlePayment(p,true);res.json({status:'paid',message:'Demo payment confirmed; votes and commission split recorded.'})});
-app.get('/api/votes/mine',auth,(req,res)=>res.json(db.prepare('SELECT v.quantity,v.created_at,n.name nominee,p.reference,p.status payment_status,p.amount,p.platform_fee FROM votes v JOIN nominees n ON v.nominee_id=n.id JOIN payments p ON p.id=v.payment_id WHERE v.user_id=? ORDER BY v.created_at DESC').all(req.user.id)));
-app.post('/api/organiser/payouts',auth,organiser,(req,res)=>{const p=z.object({amount:z.number().int().positive(),destination:z.string().trim().min(5).max(160)}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Enter a payout amount in pesewas and a payout destination.'});const ref=`PO-${randomUUID()}`;try{db.transaction(()=>{const earned=db.prepare("SELECT COALESCE(SUM(organiser_net),0) n FROM payments p JOIN events e ON p.event_id=e.id WHERE e.owner_id=? AND p.status='paid'").get(req.user.id).n;const reserved=db.prepare("SELECT COALESCE(SUM(amount),0) n FROM payouts WHERE organiser_id=? AND status IN ('requested','processing','paid')").get(req.user.id).n;if(p.data.amount>earned-reserved)throw new Error('Payout amount exceeds your available balance.');db.prepare('INSERT INTO payouts(organiser_id,amount,destination,reference) VALUES(?,?,?,?)').run(req.user.id,p.data.amount,seal(p.data.destination),ref);audit(req.user,'payout.requested','payout',ref,{amount:p.data.amount})}).immediate();}catch(err){return res.status(400).json({error:err.message||'Could not request payout.'})}res.status(201).json({reference:ref,status:'requested',message:'Payout request submitted. CrownVotes will review and process it.'})});
-app.get('/api/nominees/:id/vote-code', (req,res)=>{const n=db.prepare('SELECT n.id,n.name,e.title event FROM nominees n JOIN categories c ON c.id=n.category_id JOIN events e ON e.id=c.event_id WHERE n.id=? AND e.status=\'published\'').get(req.params.id);if(!n)return res.status(404).json({error:'Nominee not found.'});res.json({...n,short_code:`CV${String(n.id).padStart(4,'0')}`})});
-app.get('*',(req,res)=>res.sendFile(process.cwd()+'/public/index.html'));
-app.listen(PORT,()=>console.log(`CrownVotes listening on ${PORT}`));
+    if (section === 'overview') {
+      renderOverview(data);
+      return;
+    }
+
+    statsGrid.classList.add('hidden');
+
+    switch (section) {
+      case 'users':
+        output.innerHTML = renderUsers(data);
+        break;
+
+      case 'applications':
+        output.innerHTML = renderApplications(data);
+        break;
+
+      case 'events':
+        output.innerHTML = renderEvents(data);
+        break;
+
+      case 'finance':
+        output.innerHTML = renderFinance(data);
+        break;
+
+      case 'payouts':
+        output.innerHTML = renderPayouts(data);
+        break;
+
+      case 'results':
+        output.innerHTML = renderResults(data);
+        break;
+
+      case 'audit-logs':
+        output.innerHTML = renderAuditLogs(data);
+        break;
+
+      default:
+        output.textContent = 'Section not available.';
+    }
+
+  } catch (error) {
+    if (thisRequest !== requestId) return;
+
+    output.innerHTML = `
+      <div class="empty">
+        <strong>Unable to load ${escapeHTML(titles[section])}.</strong>
+        <p>${escapeHTML(error.message)}</p>
+      </div>
+    `;
+  }
+}
+
+
+/* =========================
+   DASHBOARD LOGIN
+========================= */
+
+async function loadDashboard() {
+  try {
+    const user = await api('/api/me');
+
+    if (!user || user.role !== 'admin') {
+      throw new Error('This account is not an administrator account.');
+    }
+
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+
+    document.getElementById('welcome').textContent =
+      'Logged in as ' + (user.email || 'Administrator');
+
+    message.textContent = '';
+
+    await showSection('overview');
+
+  } catch (error) {
+    token = null;
+    localStorage.removeItem('crownvotes_admin_token');
+
+    document.getElementById('dashboard').classList.add('hidden');
+    document.getElementById('login').classList.remove('hidden');
+
+    message.textContent = error.message;
+  }
+}
+
+
+/* =========================
+   LOGIN FORM
+========================= */
+
+document.getElementById('loginForm')
+  .addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    const loginButton = document.getElementById('loginButton');
+
+    loginButton.disabled = true;
+    message.style.color = 'blue';
+    message.textContent = 'Signing in...';
+
+    try {
+      const result = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: document.getElementById('email').value,
+          password: document.getElementById('password').value
+        })
+      });
+
+      if (!result.token) {
+        throw new Error('Login did not return a token.');
+      }
+
+      token = result.token;
+      localStorage.setItem('crownvotes_admin_token', token);
+
+      await loadDashboard();
+
+    } catch (error) {
+      message.style.color = '#a12626';
+      message.textContent = error.message;
+
+    } finally {
+      loginButton.disabled = false;
+    }
+  });
+
+
+/* =========================
+   THIS CONNECTS ALL MENU BUTTONS
+========================= */
+
+document.getElementById('managementMenu')
+  .addEventListener('click', function(event) {
+    const button = event.target.closest('button[data-section]');
+
+    if (!button) return;
+
+    showSection(button.dataset.section);
+  });
+
+
+/* =========================
+   TABLE SEARCH
+========================= */
+
+document.getElementById('sectionContent')
+  .addEventListener('input', function(event) {
+    if (event.target.classList.contains('table-search')) {
+      filterTable(event.target);
+    }
+  });
+
+
+/* =========================
+   MANAGEMENT ACTIONS
+========================= */
+
+document.getElementById('sectionContent')
+  .addEventListener('click', async function(event) {
+    const button = event.target.closest('button[data-action]');
+
+    if (!button) return;
+
+    const action = button.dataset.action;
+    const id = button.dataset.id;
+
+    try {
+      button.disabled = true;
+
+      /* APPLICATION APPROVAL */
+
+      if (action === 'application-review') {
+        const status = button.dataset.status;
+
+        const note = prompt(
+          'Optional administrator note for this application:',
+          ''
+        );
+
+        if (note === null) return;
+
+        if (!confirm('Are you sure you want to ' + status + ' this application?')) {
+          return;
+        }
+
+        await api('/api/admin/applications/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status,
+            admin_note: note
+          })
+        });
+
+        alert('Application ' + status + ' successfully.');
+        await showSection('applications');
+        return;
+      }
+
+
+      /* EVENT PUBLICATION STATUS */
+
+      if (action === 'event-status') {
+        const status = button.dataset.status;
+
+        if (!confirm('Change this event status to ' + status + '?')) {
+          return;
+        }
+
+        await api('/api/organiser/events/' + encodeURIComponent(id) + '/status', {
+          method: 'PATCH',
+          body: JSON.stringify({ status })
+        });
+
+        alert('Event status updated.');
+        await showSection('events');
+        return;
+      }
+
+
+      /* EVENT PAYMENT APPROVAL */
+
+      if (action === 'event-payment') {
+        const status = prompt(
+          'Enter payment approval status: pending, approved or rejected',
+          'pending'
+        );
+
+        if (status === null) return;
+
+        const cleanStatus = status.trim().toLowerCase();
+
+        if (!['pending', 'approved', 'rejected'].includes(cleanStatus)) {
+          throw new Error('Enter pending, approved or rejected.');
+        }
+
+        let note = '';
+
+        if (cleanStatus === 'approved') {
+          note = prompt(
+            'Enter the provider approval reference and compliance review note (at least 5 characters):'
+          );
+
+          if (note === null) return;
+        } else {
+          note = prompt('Optional approval note:', '') || '';
+        }
+
+        await api('/api/admin/events/' + encodeURIComponent(id) + '/payment-approval', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            payment_approval: cleanStatus,
+            approval_note: note
+          })
+        });
+
+        alert('Event payment approval updated.');
+        await showSection('events');
+        return;
+      }
+
+
+      /* EVENT COMMISSION */
+
+      if (action === 'event-commission') {
+        const current = button.dataset.commission || '10';
+
+        const answer = prompt(
+          'Enter event commission percentage (0 to 30):',
+          current
+        );
+
+        if (answer === null) return;
+
+        const percent = Number(answer);
+
+        if (!Number.isFinite(percent) || percent < 0 || percent > 30) {
+          throw new Error('Commission must be between 0 and 30 percent.');
+        }
+
+        await api('/api/admin/events/' + encodeURIComponent(id) + '/commission', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            commission_bps: Math.round(percent * 100)
+          })
+        });
+
+        alert('Event commission updated.');
+        await showSection('events');
+        return;
+      }
+
+
+      /* EVENT DELETION */
+
+      if (action === 'event-delete') {
+        if (!confirm(
+          'Permanently delete this event? This cannot be undone. Events with votes or payments cannot be deleted.'
+        )) {
+          return;
+        }
+
+        await api('/api/admin/events/' + encodeURIComponent(id), {
+          method: 'DELETE'
+        });
+
+        alert('Event deleted successfully.');
+        await showSection('events');
+        return;
+      }
+
+
+      /* PAYOUT STATUS */
+
+      if (action === 'payout-status') {
+        const status = button.dataset.status;
+        let note = '';
+
+        if (status === 'paid') {
+          note = prompt(
+            'Enter the completed bank or Mobile Money transfer reference:'
+          );
+
+          if (note === null) return;
+
+          if (note.trim().length < 5) {
+            throw new Error('The transfer reference must contain at least 5 characters.');
+          }
+
+          if (!confirm('Confirm that this payout has actually been transferred?')) {
+            return;
+          }
+
+        } else {
+          note = prompt('Optional administrator note:', '') || '';
+
+          if (!confirm('Change payout status to ' + status + '?')) {
+            return;
+          }
+        }
+
+        await api('/api/admin/payouts/' + encodeURIComponent(id), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status,
+            admin_note: note
+          })
+        });
+
+        alert('Payout status updated.');
+        await showSection('payouts');
+        return;
+      }
+
+
+      /* DEFAULT PLATFORM COMMISSION */
+
+      if (action === 'save-default-commission') {
+        const input = document.getElementById('defaultCommission');
+        const percent = Number(input.value);
+
+        if (!Number.isFinite(percent) || percent < 0 || percent > 30) {
+          throw new Error('Commission must be between 0 and 30 percent.');
+        }
+
+        if (!confirm('Save the default commission as ' + percent + '%?')) {
+          return;
+        }
+
+        await api('/api/admin/settings/commission', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            default_commission_bps: Math.round(percent * 100)
+          })
+        });
+
+        alert('Default commission updated.');
+        await showSection('overview');
+        return;
+      }
+
+    } catch (error) {
+      alert(error.message || 'The requested action could not be completed.');
+
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+
+/* =========================
+   REFRESH BUTTON
+========================= */
+
+document.getElementById('refresh')
+  .addEventListener('click', function() {
+    showSection(currentSection);
+  });
+
+
+/* =========================
+   LOGOUT BUTTON
+========================= */
+
+document.getElementById('logout')
+  .addEventListener('click', function() {
+    token = null;
+    localStorage.removeItem('crownvotes_admin_token');
+
+    requestId++;
+
+    document.getElementById('dashboard').classList.add('hidden');
+    document.getElementById('login').classList.remove('hidden');
+
+    document.getElementById('password').value = '';
+    message.textContent = 'You have logged out.';
+    message.style.color = '#a12626';
+  });
+
+
+/* =========================
+   STARTUP
+========================= */
+
+if (token) {
+  loadDashboard();
+}
+</script>
+</body>
+</html>
