@@ -316,6 +316,43 @@ if (section === 'overview') {
     return;
   }
 
+      if (section === 'events') {
+  if (!Array.isArray(data) || data.length === 0) {
+    output.textContent = 'No events found.';
+    return;
+  }
+
+  output.innerHTML = `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Event Title</th>
+            <th>Organiser</th>
+            <th>Status</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(event => `
+            <tr>
+              <td>${escapeHTML(event.title || 'Untitled')}</td>
+              <td>${escapeHTML(event.organiser || '—')}</td>
+              <td>
+                <span class="role-badge">
+                  ${escapeHTML(event.status || 'Unknown')}
+                </span>
+              </td>
+              <td>${escapeHTML(event.created_at || '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  return;
+}
   output.innerHTML = `
     <div class="table-wrap">
       <table class="data-table">
