@@ -94,6 +94,45 @@ button {
     grid-template-columns: 1fr;
   }
 }
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.data-table th {
+  background: #35206d;
+  color: white;
+  padding: 12px 8px;
+  text-align: left;
+}
+
+.data-table td {
+  padding: 12px 8px;
+  border-bottom: 1px solid #eee;
+  overflow-wrap: anywhere;
+}
+
+.data-table tr:hover {
+  background: #f5f2fc;
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.role-badge {
+  display: inline-block;
+  background: #eee8ff;
+  color: #35206d;
+  padding: 5px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: bold;
+}
 </style>
 </head>
 <body>
@@ -165,7 +204,7 @@ button {
 
   <div class="panel">
     <h3 id="sectionTitle">Overview</h3>
-    <pre id="sectionContent">Loading...</pre>
+    <div id="sectionContent">Loading...</div>
     <button type="button" id="refresh">Refresh Section</button>
   </div>
 
@@ -219,7 +258,16 @@ const titles = {
   'audit-logs': 'Audit Logs'
 };
 
-async function showSection(section) {
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[character]);
+}
+  async function showSection(section) {
   if (!endpoints[section]) return;
 
   currentSection = section;
@@ -261,6 +309,43 @@ if (section === 'overview') {
 
 } else {
   statsGrid.classList.add('hidden');
+}
+    if (section === 'users') {
+  if (!Array.isArray(data) || data.length === 0) {
+    output.textContent = 'No users found.';
+    return;
+  }
+
+  output.innerHTML = `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Registered</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(user => `
+            <tr>
+              <td>${escapeHTML(user.name)}</td>
+              <td>${escapeHTML(user.email)}</td>
+              <td>
+                <span class="role-badge">
+                  ${escapeHTML(user.role)}
+                </span>
+              </td>
+              <td>${escapeHTML(user.created_at)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  return;
 }
     let displayData = data;
 
