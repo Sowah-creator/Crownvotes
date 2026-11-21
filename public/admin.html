@@ -62,6 +62,38 @@ button {
 @media (max-width: 450px) {
   .menu { grid-template-columns: 1fr; }
 }
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 15px 0;
+}
+
+.stat-card {
+  background: white;
+  border-left: 4px solid #35206d;
+  padding: 16px;
+  border-radius: 9px;
+  box-shadow: 0 2px 8px #0001;
+}
+
+.stat-card p {
+  color: #666;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.stat-card h2 {
+  color: #35206d;
+  margin: 0;
+  font-size: 25px;
+}
+
+@media (max-width: 400px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
 </head>
 <body>
@@ -84,6 +116,39 @@ button {
   <h2>Admin Control Centre</h2>
   <p id="welcome"></p>
 
+  <div id="statsGrid" class="stats-grid hidden">
+
+  <div class="stat-card">
+    <p>Total Users</p>
+    <h2 id="statUsers">0</h2>
+  </div>
+
+  <div class="stat-card">
+    <p>Total Organisers</p>
+    <h2 id="statOrganisers">0</h2>
+  </div>
+
+  <div class="stat-card">
+    <p>Total Events</p>
+    <h2 id="statEvents">0</h2>
+  </div>
+
+  <div class="stat-card">
+    <p>Total Votes</p>
+    <h2 id="statVotes">0</h2>
+  </div>
+
+  <div class="stat-card">
+    <p>Gross Revenue</p>
+    <h2 id="statRevenue">GHS 0</h2>
+  </div>
+
+  <div class="stat-card">
+    <p>Platform Earnings</p>
+    <h2 id="statEarnings">GHS 0</h2>
+  </div>
+
+</div>
   <div class="panel">
     <h3>Management Menu</h3>
     <div class="menu" id="managementMenu">
@@ -171,6 +236,32 @@ async function showSection(section) {
 
     if (thisRequest !== requestId) return;
 
+   const statsGrid = document.getElementById('statsGrid');
+
+if (section === 'overview') {
+  statsGrid.classList.remove('hidden');
+
+  document.getElementById('statUsers').textContent =
+    Number(data.users || 0).toLocaleString();
+
+  document.getElementById('statOrganisers').textContent =
+    Number(data.organisers || 0).toLocaleString();
+
+  document.getElementById('statEvents').textContent =
+    Number(data.events || 0).toLocaleString();
+
+  document.getElementById('statVotes').textContent =
+    Number(data.votes || 0).toLocaleString();
+
+  document.getElementById('statRevenue').textContent =
+    'GHS ' + Number(data.revenue || 0).toLocaleString();
+
+  document.getElementById('statEarnings').textContent =
+    'GHS ' + Number(data.platform_earnings || 0).toLocaleString();
+
+} else {
+  statsGrid.classList.add('hidden');
+}
     let displayData = data;
 
     if (section === 'payouts') {
