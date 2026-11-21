@@ -1,0 +1,714 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CrownVotes | Organiser Portal</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f3fa;color:#241b35;font-family:Arial,sans-serif}
+header{background:#30205f;color:white;padding:22px}
+header h1{margin:0}
+header p{margin:7px 0 0;color:#ddd}
+main{max-width:1000px;margin:25px auto;padding:0 14px}
+.card{background:white;padding:20px;margin-bottom:18px;border-radius:12px;box-shadow:0 2px 12px #0000000d}
+h2{color:#30205f;margin-top:0}
+h3{color:#30205f}
+input,textarea,select,button{width:100%;padding:12px;margin:7px 0;border-radius:7px;font-size:15px}
+input,textarea,select{border:1px solid #d5cede;background:white}
+textarea{min-height:85px}
+button{background:#30205f;color:white;border:0;font-weight:bold;cursor:pointer}
+button.secondary{background:#eee9f7;color:#30205f}
+button:disabled{opacity:.5;cursor:not-allowed}
+.hidden{display:none!important}
+.message{padding:12px;background:#f0ebfa;border-radius:7px;margin:10px 0}
+.error{background:#fdebed;color:#9b1c2c}
+.success{background:#e8f6ec;color:#176b35}
+.muted{font-size:13px;color:#777}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.stat{background:#f4f0fb;padding:15px;border-radius:9px}
+.stat strong{display:block;font-size:22px;color:#30205f;margin-top:6px}
+.event,.category,.nominee{border:1px solid #e4deef;padding:14px;border-radius:9px;margin:12px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row button{flex:1}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}
+.tabs button{width:auto;flex:1;min-width:100px}
+.status{font-weight:bold;color:#7954a8}
+img.nominee-image{width:85px;height:85px;object-fit:cover;border-radius:9px}
+label{font-size:13px;color:#555}
+hr{border:0;border-top:1px solid #eee;margin:18px 0}
+</style>
+</head>
+<body>
+
+<header>
+<h1>CrownVotes</h1>
+<p>Organiser Control Centre</p>
+</header>
+
+<main>
+
+<div id="message" class="message hidden"></div>
+
+<!-- ACCOUNT AREA -->
+<section id="authArea" class="card">
+<h2>Welcome to CrownVotes</h2>
+<p class="muted">Sign in or create an account to become a CrownVotes organiser.</p>
+
+<div id="loginBox">
+<h3>Organiser Login</h3>
+<form id="loginForm">
+<input id="loginEmail" type="email" placeholder="Email address" required>
+<input id="loginPassword" type="password" placeholder="Password" required>
+<button type="submit">Sign In</button>
+</form>
+<button class="secondary" id="showRegister">Create an Account</button>
+</div>
+
+<div id="registerBox" class="hidden">
+<h3>Create Your Account</h3>
+<form id="registerForm">
+<input id="regName" placeholder="Full name" required minlength="2">
+<input id="regEmail" type="email" placeholder="Email address" required>
+<input id="regPassword" type="password" placeholder="Password (minimum 10 characters)" required minlength="10">
+<button type="submit">Create Account</button>
+</form>
+<button class="secondary" id="showLogin">Already have an account? Sign in</button>
+</div>
+</section>
+
+<!-- APPLICATION AREA -->
+<section id="applicationArea" class="card hidden">
+<h2>Become a CrownVotes Organiser</h2>
+<p>Your account needs administrator approval before you can manage voting events.</p>
+<div id="applicationStatus" class="message"></div>
+
+<form id="applicationForm">
+<input id="organisation" placeholder="Organisation or company name" required minlength="2">
+<input id="phone" type="tel" placeholder="Contact phone number" required minlength="9">
+<textarea id="details" placeholder="Tell us about your organisation or the events you plan to organise"></textarea>
+<button type="submit">Submit Organiser Application</button>
+</form>
+<button class="secondary" id="applicationLogout">Sign Out</button>
+</section>
+
+<!-- DASHBOARD -->
+<section id="dashboardArea" class="hidden">
+
+<div class="card">
+<div class="row">
+<div style="flex:2">
+<h2>Organiser Dashboard</h2>
+<p id="welcome" class="muted"></p>
+</div>
+<div style="flex:1">
+<button class="secondary" id="refreshBtn">Refresh</button>
+<button id="logoutBtn">Sign Out</button>
+</div>
+</div>
+
+<div class="grid">
+<div class="stat">Gross Revenue<strong id="gross">GH₵0.00</strong></div>
+<div class="stat">Platform Fees<strong id="fees">GH₵0.00</strong></div>
+<div class="stat">Your Earnings<strong id="earned">GH₵0.00</strong></div>
+<div class="stat">Paid Out<strong id="paid">GH₵0.00</strong></div>
+<div class="stat">Available Balance<strong id="available">GH₵0.00</strong></div>
+</div>
+</div>
+
+<!-- EVENT CREATION -->
+<div class="card">
+<h2>Create a Voting Event</h2>
+<form id="eventForm">
+<input id="eventTitle" placeholder="Event title" required minlength="3">
+<textarea id="eventDescription" placeholder="Describe your event"></textarea>
+
+<label>Event start date</label>
+<input id="eventStart" type="datetime-local">
+
+<label>Event end date</label>
+<input id="eventEnd" type="datetime-local">
+
+<label>Price per vote (Ghana cedis)</label>
+<input id="votePrice" type="number" min="0.01" step="0.01" placeholder="Example: 1.00" required>
+
+<label>Prize structure</label>
+<select id="prizeStructure">
+<option value="mixed">Cash and material prizes</option>
+<option value="cash">Cash prizes</option>
+<option value="material">Material prizes</option>
+<option value="recognition">Recognition only</option>
+</select>
+
+<button type="submit">Create Voting Event</button>
+</form>
+<p class="muted">Events are initially created as drafts and require the necessary administrator approval before publication.</p>
+</div>
+
+<!-- EVENTS -->
+<div class="card">
+<h2>My Voting Events</h2>
+<div id="eventsList">Loading events...</div>
+</div>
+
+<!-- PAYMENTS -->
+<div class="card">
+<h2>Recent Payments</h2>
+<div id="paymentsList">Loading payment records...</div>
+</div>
+
+<!-- PAYOUTS -->
+<div class="card">
+<h2>Payout History</h2>
+<p id="payoutSummary" class="muted"></p>
+<div id="payoutsList">Loading payouts...</div>
+</div>
+
+</section>
+
+<!-- EVENT MANAGEMENT -->
+<section id="eventDetailsArea" class="card hidden">
+<button class="secondary" id="backBtn">← Back to Dashboard</button>
+<h2 id="manageTitle">Manage Voting Event</h2>
+
+<div id="eventInformation"></div>
+
+<hr>
+
+<h3>Edit Event Details</h3>
+<form id="editEventForm">
+<input id="editTitle" placeholder="Event title" required>
+<textarea id="editDescription" placeholder="Event description"></textarea>
+<label>Vote price in Ghana cedis</label>
+<input id="editPrice" type="number" min="0.01" step="0.01" required>
+<button type="submit">Save Event Changes</button>
+</form>
+
+<hr>
+
+<h3>Create Award Category</h3>
+<form id="categoryForm">
+<input id="categoryName" placeholder="Category name" required minlength="2">
+<textarea id="categoryDescription" placeholder="Category description"></textarea>
+<button type="submit">Add Category</button>
+</form>
+
+<div id="categoriesList"></div>
+</section>
+
+</main>
+
+<script>
+const TOKEN_KEY='crownvotes_organizer_token';
+const API='';
+let token=localStorage.getItem(TOKEN_KEY)||'';
+let currentUser=null;
+let currentEvent=null;
+
+const $=id=>document.getElementById(id);
+
+function money(value){
+ return 'GH₵'+(Number(value||0)/100).toFixed(2);
+}
+
+function escapeHTML(value){
+ return String(value??'').replace(/[&<>"']/g,c=>({
+ '&':'&amp;',
+ '<':'&lt;',
+ '>':'&gt;',
+ '"':'&quot;',
+ "'":'&#39;'
+ })[c]);
+}
+
+function notify(message,type='normal'){
+ const box=$('message');
+ box.textContent=message;
+ box.className='message';
+ if(type==='error')box.classList.add('error');
+ if(type==='success')box.classList.add('success');
+ box.classList.remove('hidden');
+ window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function clearMessage(){
+ $('message').classList.add('hidden');
+}
+
+async function api(path,options={}){
+ const headers={...(options.headers||{})};
+ if(options.body)headers['Content-Type']='application/json';
+ if(token)headers.Authorization='Bearer '+token;
+
+ const response=await fetch(API+path,{
+  ...options,
+  headers
+ });
+
+ const data=await response.json().catch(()=>({}));
+
+ if(!response.ok){
+  throw new Error(data.error||'Request failed.');
+ }
+ return data;
+}
+
+function showOnly(id){
+ ['authArea','applicationArea','dashboardArea','eventDetailsArea']
+ .forEach(x=>$(x).classList.add('hidden'));
+ $(id).classList.remove('hidden');
+}
+
+function saveLogin(data){
+ token=data.token;
+ currentUser=data.user;
+ localStorage.setItem(TOKEN_KEY,token);
+}
+
+function logout(){
+ token='';
+ currentUser=null;
+ localStorage.removeItem(TOKEN_KEY);
+ showOnly('authArea');
+ clearMessage();
+ showLoginBox();
+}
+
+function showLoginBox(){
+ $('loginBox').classList.remove('hidden');
+ $('registerBox').classList.add('hidden');
+}
+
+$('showRegister').onclick=()=>{
+ $('loginBox').classList.add('hidden');
+ $('registerBox').classList.remove('hidden');
+ clearMessage();
+};
+
+$('showLogin').onclick=()=>{
+ showLoginBox();
+ clearMessage();
+};
+
+$('loginForm').onsubmit=async e=>{
+ e.preventDefault();
+ clearMessage();
+
+ try{
+  const data=await api('/api/auth/login',{
+   method:'POST',
+   body:JSON.stringify({
+    email:$('loginEmail').value,
+    password:$('loginPassword').value
+   })
+  });
+
+  saveLogin(data);
+  await startPortal();
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+};
+
+$('registerForm').onsubmit=async e=>{
+ e.preventDefault();
+ clearMessage();
+
+ try{
+  const data=await api('/api/auth/register',{
+   method:'POST',
+   body:JSON.stringify({
+    name:$('regName').value,
+    email:$('regEmail').value,
+    password:$('regPassword').value
+   })
+  });
+
+  saveLogin(data);
+  await startPortal();
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+};
+
+async function startPortal(){
+ try{
+  const user=await api('/api/me');
+  currentUser=user;
+
+  if(user.role==='organiser'||user.role==='admin'){
+   await loadDashboard();
+  }else{
+   await loadApplication();
+  }
+
+ }catch(error){
+  logout();
+  notify('Please sign in again. '+error.message,'error');
+ }
+}
+
+async function loadApplication(){
+ showOnly('applicationArea');
+
+ try{
+  const application=await api('/api/organiser/application');
+
+  if(application){
+   $('applicationStatus').textContent=
+    'Application status: '+application.status.toUpperCase()+
+    (application.admin_note?' | Administrator note: '+application.admin_note:'');
+
+   $('organisation').value=application.organisation||'';
+   $('phone').value=application.phone||'';
+   $('details').value=application.details||'';
+
+   if(application.status!=='rejected'){
+    $('applicationForm').classList.add('hidden');
+   }else{
+    $('applicationForm').classList.remove('hidden');
+   }
+
+  }else{
+   $('applicationStatus').textContent='You have not submitted an application yet.';
+   $('applicationForm').classList.remove('hidden');
+  }
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+}
+
+$('applicationForm').onsubmit=async e=>{
+ e.preventDefault();
+ clearMessage();
+
+ try{
+  const data=await api('/api/organiser/apply',{
+   method:'POST',
+   body:JSON.stringify({
+    organisation:$('organisation').value,
+    phone:$('phone').value,
+    details:$('details').value
+   })
+  });
+
+  notify(data.message||'Application submitted successfully.','success');
+  await loadApplication();
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+};
+
+$('applicationLogout').onclick=logout;
+$('logoutBtn').onclick=logout;
+
+async function loadDashboard(){
+ showOnly('dashboardArea');
+ $('welcome').textContent='Welcome, '+(currentUser?.name||'Organiser');
+ $('eventsList').textContent='Loading events...';
+
+ try{
+  const data=await api('/api/organiser/dashboard');
+
+  $('gross').textContent=money(data.gross);
+  $('fees').textContent=money(data.fees);
+  $('earned').textContent=money(data.earned);
+  $('paid').textContent=money(data.paid_out);
+  $('available').textContent=money(data.available);
+
+  renderEvents(data.events||[]);
+  renderPayments(data.recent_payments||[]);
+  renderPayouts(data.payouts||[]);
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+}
+
+function renderEvents(events){
+ if(!events.length){
+  $('eventsList').innerHTML='<p class="muted">You have not created any events yet.</p>';
+  return;
+ }
+
+ $('eventsList').innerHTML=events.map(event=>`
+  <div class="event">
+   <h3>${escapeHTML(event.title)}</h3>
+   <p>Status: <strong>${escapeHTML(event.status)}</strong></p>
+   <p class="muted">Event ID: ${event.id}</p>
+   <button onclick="manageEvent(${Number(event.id)})">Manage Event</button>
+  </div>
+ `).join('');
+}
+
+function renderPayments(payments){
+ if(!payments.length){
+  $('paymentsList').innerHTML='<p class="muted">No payment records yet.</p>';
+  return;
+ }
+
+ $('paymentsList').innerHTML=payments.map(p=>`
+  <div class="event">
+   <strong>${escapeHTML(p.event)}</strong>
+   <p>Reference: ${escapeHTML(p.reference)}</p>
+   <p>Amount: ${money(p.amount)}</p>
+   <p>Your earnings: ${money(p.organiser_net)}</p>
+   <p>Status: ${escapeHTML(p.status)}</p>
+  </div>
+ `).join('');
+}
+
+function renderPayouts(payouts){
+ if(!payouts.length){
+  $('payoutsList').innerHTML='<p class="muted">No payout records yet.</p>';
+  return;
+ }
+
+ $('payoutsList').innerHTML=payouts.map(p=>`
+  <div class="event">
+   <p>Amount: ${money(p.amount)}</p>
+   <p>Status: ${escapeHTML(p.status)}</p>
+   <p>Reference: ${escapeHTML(p.reference||'Not available')}</p>
+   <p>Administrator note: ${escapeHTML(p.admin_note||'None')}</p>
+  </div>
+ `).join('');
+}
+
+$('payoutSummary').textContent='Pending payout requests: loading...';
+
+$('refreshBtn').onclick=loadDashboard;
+
+$('eventForm').onsubmit=async e=>{
+ e.preventDefault();
+ clearMessage();
+
+ const price=Number($('votePrice').value);
+
+ if(!Number.isFinite(price)||price<=0){
+  notify('Enter a valid vote price.','error');
+  return;
+ }
+
+ try{
+  const eventData={
+   title:$('eventTitle').value,
+   description:$('eventDescription').value,
+   starts_at:$('eventStart').value?
+    new Date($('eventStart').value).toISOString():undefined,
+   ends_at:$('eventEnd').value?
+    new Date($('eventEnd').value).toISOString():undefined,
+   vote_price:Math.round(price*100),
+   prize_structure:$('prizeStructure').value
+  };
+
+  const result=await api('/api/organiser/events',{
+   method:'POST',
+   body:JSON.stringify(eventData)
+  });
+
+  notify('Event created successfully. Add categories and contestants next.','success');
+  $('eventForm').reset();
+  await loadDashboard();
+  await manageEvent(result.id);
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+};
+
+async function manageEvent(id){
+ clearMessage();
+
+ try{
+  const event=await api('/api/organiser/events/'+id);
+  currentEvent=event;
+
+  showOnly('eventDetailsArea');
+  $('manageTitle').textContent=event.title;
+
+  $('editTitle').value=event.title||'';
+  $('editDescription').value=event.description||'';
+  $('editPrice').value=(Number(event.vote_price||0)/100).toFixed(2);
+
+  $('eventInformation').innerHTML=`
+   <p><strong>Event:</strong> ${escapeHTML(event.title)}</p>
+   <p><strong>Status:</strong> ${escapeHTML(event.status)}</p>
+   <p><strong>Voting price:</strong> ${money(event.vote_price)}</p>
+   <p class="muted">Event ID: ${event.id}</p>
+  `;
+
+  renderCategories(event.categories||[]);
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+}
+
+function renderCategories(categories){
+ if(!categories.length){
+  $('categoriesList').innerHTML='<p class="muted">No categories yet. Create your first category above.</p>';
+  return;
+ }
+
+ $('categoriesList').innerHTML=categories.map(category=>`
+  <div class="category">
+   <h3>${escapeHTML(category.name)}</h3>
+   <p class="muted">${escapeHTML(category.description||'')}</p>
+   <h4>Contestants / Nominees</h4>
+   ${(category.nominees||[]).map(n=>`
+    <div class="nominee">
+     ${n.image_url?`<img class="nominee-image" src="${escapeHTML(n.image_url)}" alt="Nominee image">`:''}
+     <p><strong>${escapeHTML(n.name)}</strong></p>
+     <p>${escapeHTML(n.bio||'')}</p>
+     <p>Short code: <strong>${escapeHTML(n.short_code||'')}</strong></p>
+     <p>Votes: <strong>${Number(n.vote_count||0)}</strong></p>
+     <button class="secondary" onclick="editNominee(${Number(n.id)},${Number(category.id)})">Edit Contestant</button>
+    </div>
+   `).join('')}
+   <form onsubmit="addNominee(event,${Number(category.id)})">
+    <h4>Add Contestant</h4>
+    <input name="name" placeholder="Contestant full name" required minlength="2">
+    <textarea name="bio" placeholder="Contestant biography"></textarea>
+    <input name="image_url" type="url" placeholder="HTTPS image URL (optional)">
+    <button type="submit">Add Contestant</button>
+   </form>
+  </div>
+ `).join('');
+}
+
+$('editEventForm').onsubmit=async e=>{
+ e.preventDefault();
+ if(!currentEvent)return;
+
+ const price=Number($('editPrice').value);
+
+ if(!Number.isFinite(price)||price<=0){
+  notify('Enter a valid vote price.','error');
+  return;
+ }
+
+ try{
+  await api('/api/organiser/events/'+currentEvent.id,{
+   method:'PATCH',
+   body:JSON.stringify({
+    title:$('editTitle').value,
+    description:$('editDescription').value,
+    vote_price:Math.round(price*100)
+   })
+  });
+
+  notify('Event details updated successfully.','success');
+  await manageEvent(currentEvent.id);
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+};
+
+$('categoryForm').onsubmit=async e=>{
+ e.preventDefault();
+ if(!currentEvent)return;
+
+ try{
+  await api('/api/organiser/events/'+currentEvent.id+'/categories',{
+   method:'POST',
+   body:JSON.stringify({
+    name:$('categoryName').value,
+    description:$('categoryDescription').value
+   })
+  });
+
+  $('categoryForm').reset();
+  notify('Award category added successfully.','success');
+  await manageEvent(currentEvent.id);
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+};
+
+async function addNominee(event,categoryId){
+ event.preventDefault();
+ const form=event.target;
+
+ try{
+  const data=new FormData(form);
+
+  await api('/api/organiser/categories/'+categoryId+'/nominees',{
+   method:'POST',
+   body:JSON.stringify({
+    name:data.get('name'),
+    bio:data.get('bio'),
+    image_url:data.get('image_url')
+   })
+  });
+
+  notify('Contestant added successfully.','success');
+  await manageEvent(currentEvent.id);
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+}
+
+async function editNominee(id,categoryId){
+ const name=prompt('Enter the contestant name:');
+ if(name===null)return;
+ if(name.trim().length<2){
+  notify('Enter a valid contestant name.','error');
+  return;
+ }
+
+ const bio=prompt('Enter the contestant biography:');
+ if(bio===null)return;
+
+ const image=prompt('Enter the contestant HTTPS image URL, or leave blank:');
+ if(image===null)return;
+
+ try{
+  await api('/api/organiser/nominees/'+id,{
+   method:'PATCH',
+   body:JSON.stringify({
+    name:name.trim(),
+    bio:bio,
+    image_url:image.trim()
+   })
+  });
+
+  notify('Contestant profile updated.','success');
+  await manageEvent(currentEvent.id);
+
+ }catch(error){
+  notify(error.message,'error');
+ }
+}
+
+$('backBtn').onclick=async()=>{
+ currentEvent=null;
+ await loadDashboard();
+};
+
+async function initialise(){
+ if(!token){
+  showOnly('authArea');
+  return;
+ }
+
+ try{
+  currentUser=await api('/api/me');
+  await startPortal();
+ }catch(error){
+  logout();
+ }
+}
+
+initialise();
+</script>
+
+</body>
+</html>
