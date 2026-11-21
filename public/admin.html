@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,67 +7,114 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CrownVotes Admin</title>
 <style>
-body{font-family:Arial,sans-serif;background:#f4f5f9;margin:0;padding:20px;color:#222}
-.container{max-width:650px;margin:20px auto;background:white;padding:22px;border-radius:12px;box-shadow:0 3px 15px #0001}
-h1{color:#35206d}
-input,button{width:100%;padding:13px;margin:8px 0;box-sizing:border-box;border-radius:7px;font-size:16px}
-input{border:1px solid #ccc}
-button{background:#35206d;color:white;border:0;font-weight:bold}
-button:disabled{opacity:.6}
-.hidden{display:none}
-.panel{background:#f5f2fc;padding:15px;margin:12px 0;border-radius:8px}
-pre{white-space:pre-wrap;overflow-wrap:anywhere}
-#message{color:#a12626}
+* { box-sizing: border-box; }
+body {
+  font-family: Arial, sans-serif;
+  background: #f4f5f9;
+  margin: 0;
+  padding: 15px;
+  color: #222;
+}
+.container {
+  max-width: 850px;
+  margin: 20px auto;
+  background: white;
+  padding: 22px;
+  border-radius: 12px;
+  box-shadow: 0 3px 15px #0001;
+}
+h1 { color: #35206d; }
+input, button {
+  width: 100%;
+  padding: 13px;
+  margin: 7px 0;
+  border-radius: 7px;
+  font-size: 16px;
+}
+input { border: 1px solid #ccc; }
+button {
+  background: #35206d;
+  color: white;
+  border: 0;
+  font-weight: bold;
+  cursor: pointer;
+}
+.hidden { display: none; }
+.panel {
+  background: #f5f2fc;
+  padding: 15px;
+  margin: 12px 0;
+  border-radius: 8px;
+}
+#message { color: #a12626; }
+#sectionContent {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.menu {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.menu button { margin: 0; }
+@media (max-width: 450px) {
+  .menu { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
 <div class="container">
+
 <h1>CrownVotes Admin</h1>
 <p>Administrator control panel</p>
 
 <div id="login">
-  <p id="message"></p›
-<h2>Admin Login</h2>
-  <p style="color:blue;font-weight:bold">ADMIN PAGE TEST</p>
-  <p style="color:green;font-weight:bold">JAVASCRIPT TEST: <span id="jsTest">NOT RUNNING</span></p>
-<form id="loginForm">
-<input id="email" type="email" placeholder="Admin email" required>
-<input id="password" type="password" placeholder="Admin password" required>
-<button type="submit">Login</button>
-</form>
+  <p id="message"></p>
+  <h2>Admin Login</h2>
+  <form id="loginForm">
+    <input id="email" type="email" placeholder="Admin email" required>
+    <input id="password" type="password" placeholder="Admin password" required>
+    <button type="submit">Login</button>
+  </form>
 </div>
 
 <div id="dashboard" class="hidden">
-<h2>Admin Control Centre</h2>
-<p id="welcome"></p>
+  <h2>Admin Control Centre</h2>
+  <p id="welcome"></p>
 
-<div class="panel">
-<h3>Management Menu</h3>
-<button onclick="showSection('overview')">Overview</button>
-<button type="button" onclick="showSection('users')">Users</button>
-  <button type="button" onclick="showSection('organizers')">Organizers</button>
-<button type="button" onclick="showSection('applications')">Applications</button>
-<button type="button" onclick="showSection('events')">Events</button>
-<button type="button" onclick="showSection('finance')">Finance</button>
-<button type="button" onclick="showSection('payouts')">Payouts</button>
-<button type="button" onclick="showSection('results')">Results</button>
-<button type="button" onclick="showSection('audit-logs')">Audit Logs</button>
+  <div class="panel">
+    <h3>Management Menu</h3>
+    <div class="menu" id="managementMenu">
+      <button type="button" data-section="overview">Overview</button>
+      <button type="button" data-section="users">Users</button>
+      <button type="button" data-section="applications">Applications</button>
+      <button type="button" data-section="events">Events</button>
+      <button type="button" data-section="finance">Finance</button>
+      <button type="button" data-section="payouts">Payouts</button>
+      <button type="button" data-section="results">Results</button>
+      <button type="button" data-section="audit-logs">Audit Logs</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3 id="sectionTitle">Overview</h3>
+    <pre id="sectionContent">Loading...</pre>
+    <button type="button" id="refresh">Refresh Section</button>
+  </div>
+
+  <button type="button" id="logout">Logout</button>
 </div>
-
-<div class="panel">
-<h3 id="sectionTitle">Overview</h3>
-<pre id="sectionContent">Loading...</pre>
-<button id="refresh">Refresh Section</button>
-</div>
-
-<button id="logout">Logout</button>
 </div>
 
 <script>
 const message = document.getElementById('message');
 let token = localStorage.getItem('crownvotes_admin_token');
+let currentSection = 'overview';
+let requestId = 0;
 
-async function api(path, options={}) {
+async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
@@ -75,63 +123,77 @@ async function api(path, options={}) {
       ...(options.headers || {})
     }
   });
+
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Request failed');
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Request failed. HTTP ' + response.status);
+  }
   return data;
 }
 
-  
+const endpoints = {
+  overview: '/api/admin/overview',
+  users: '/api/admin/users',
+  applications: '/api/admin/applications',
+  events: '/api/admin/events',
+  finance: '/api/admin/finance',
+  payouts: '/api/admin/finance',
+  results: '/api/admin/results',
+  'audit-logs': '/api/admin/audit-logs'
+};
+
+const titles = {
+  overview: 'Overview',
+  users: 'Users',
+  applications: 'Organiser Applications',
+  events: 'Events',
+  finance: 'Finance',
+  payouts: 'Payouts',
+  results: 'Election Results',
+  'audit-logs': 'Audit Logs'
+};
+
 async function showSection(section) {
-  const requestId = (window.__adminSectionRequestId || 0) + 1;
-  window.__adminSectionRequestId = requestId;
+  if (!endpoints[section]) return;
 
-  const endpoints = {
-    overview: '/api/admin/overview',
-    users: '/api/admin/users',
-    organizers: '/api/admin/applications',
-    applications: '/api/admin/applications',
-    events: '/api/admin/events',
-    finance: '/api/admin/finance',
-    payouts: '/api/admin/finance',
-    results: '/api/admin/results',
-    'audit-logs': '/api/admin/audit-logs'
-  };
-
-  const titles = {
-    overview: 'Overview',
-    users: 'Users',
-    organizers: 'Organizers',
-    applications: 'Organiser Applications',
-    events: 'Events',
-    finance: 'Finance',
-    payouts: 'Payouts',
-    results: 'Election Results',
-    'audit-logs': 'Audit Logs'
-  };
+  currentSection = section;
+  const thisRequest = ++requestId;
 
   const output = document.getElementById('sectionContent');
   const heading = document.getElementById('sectionTitle');
 
-  if (!output || !heading) return;
-
-  heading.textContent = titles[section] || 'Admin Section';
-  output.textContent = 'Loading...';
+  heading.textContent = titles[section];
+  output.textContent = 'Loading ' + titles[section] + '...';
 
   try {
     const data = await api(endpoints[section]);
 
-    if (requestId !== window.__adminSectionRequestId) return;
+    if (thisRequest !== requestId) return;
+
+    let displayData = data;
+
+    if (section === 'payouts') {
+      displayData = data.payouts || [];
+    }
 
     output.textContent =
-      'Section: ' + section +
+      'Section: ' + titles[section] +
       '\nEndpoint: ' + endpoints[section] +
-      '\nResponse: ' + JSON.stringify(data, null, 2);
+      '\n\n' + JSON.stringify(displayData, null, 2);
 
   } catch (error) {
-    if (requestId !== window.__adminSectionRequestId) return;
+    if (thisRequest !== requestId) return;
     output.textContent = 'Error: ' + error.message;
   }
 }
+
+document.getElementById('managementMenu')
+  .addEventListener('click', function(event) {
+    const button = event.target.closest('button[data-section]');
+    if (!button) return;
+    showSection(button.dataset.section);
+  });
 
 async function loadDashboard() {
   try {
@@ -148,7 +210,6 @@ async function loadDashboard() {
       'Logged in as ' + (user.email || 'Administrator');
 
     message.textContent = '';
-
     await showSection('overview');
 
   } catch (error) {
@@ -162,44 +223,56 @@ async function loadDashboard() {
   }
 }
 
+document.getElementById('loginForm')
+  .addEventListener('submit', async function(event) {
+    event.preventDefault();
 
-document.getElementById('loginForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  alert('LOGIN BUTTON WORKS');
-  message.style.color = 'blue';
-message.textContent = 'Signing in...';
+    message.style.color = 'blue';
+    message.textContent = 'Signing in...';
 
-  try {
-    const result = await api('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: document.getElementById('email').value,
-        password: document.getElementById('password').value
-      })
-    });
+    try {
+      const result = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: document.getElementById('email').value,
+          password: document.getElementById('password').value
+        })
+      });
 
-    if (!result.token) throw new Error('Login did not return a token.');
+      if (!result.token) {
+        throw new Error('Login did not return a token.');
+      }
 
-    token = result.token;
-    localStorage.setItem('crownvotes_admin_token', token);
-    await loadDashboard();
-  } catch (error) {
-    message.textContent = error.message;
-  }
-});
+      token = result.token;
+      localStorage.setItem('crownvotes_admin_token', token);
+      await loadDashboard();
 
-document.getElementById('refresh').addEventListener('click', loadDashboard);
+    } catch (error) {
+      message.style.color = '#a12626';
+      message.textContent = error.message;
+    }
+  });
 
-document.getElementById('logout').addEventListener('click', () => {
-  token = null;
-  localStorage.removeItem('crownvotes_admin_token');
-  document.getElementById('dashboard').classList.add('hidden');
-  document.getElementById('login').classList.remove('hidden');
-  message.textContent = 'You have logged out.';
-});
+document.getElementById('refresh')
+  .addEventListener('click', function() {
+    showSection(currentSection);
+  });
 
-if (token) loadDashboard();
-  document.getElementById('jsTest').textContent = 'RUNNING';
+document.getElementById('logout')
+  .addEventListener('click', function() {
+    token = null;
+    localStorage.removeItem('crownvotes_admin_token');
+
+    document.getElementById('dashboard').classList.add('hidden');
+    document.getElementById('login').classList.remove('hidden');
+
+    message.textContent = 'You have logged out.';
+  });
+
+if (token) {
+  loadDashboard();
+}
 </script>
 </body>
 </html>
+
