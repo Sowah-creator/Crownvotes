@@ -115,7 +115,8 @@ async function showSection(section) {
   if (!output || !heading) return;
 
   heading.textContent = titles[section] || 'Admin Section';
-  alert('Function received: ' + section);
+  alert('RECEIVED: ' + section);
+heading.textContent = 'TEST: ' + section;
   alert('Selected section: ' + section);
   output.textContent = 'Loading...';
 
