@@ -267,7 +267,8 @@ function escapeHTML(value) {
     "'": '&#39;'
   })[character]);
 }
-  async function showSection(section) {
+  
+async function showSection(section) {
   if (!endpoints[section]) return;
 
   currentSection = section;
@@ -284,106 +285,136 @@ function escapeHTML(value) {
 
     if (thisRequest !== requestId) return;
 
-   const statsGrid = document.getElementById('statsGrid');
+    const statsGrid = document.getElementById('statsGrid');
 
-if (section === 'overview') {
-  statsGrid.classList.remove('hidden');
+    if (section === 'overview') {
+      statsGrid.classList.remove('hidden');
 
-  document.getElementById('statUsers').textContent =
-    Number(data.users || 0).toLocaleString();
+      document.getElementById('statUsers').textContent =
+        Number(data.users || 0).toLocaleString();
 
-  document.getElementById('statOrganisers').textContent =
-    Number(data.organisers || 0).toLocaleString();
+      document.getElementById('statOrganisers').textContent =
+        Number(data.organisers || 0).toLocaleString();
 
-  document.getElementById('statEvents').textContent =
-    Number(data.events || 0).toLocaleString();
+      document.getElementById('statEvents').textContent =
+        Number(data.events || 0).toLocaleString();
 
-  document.getElementById('statVotes').textContent =
-    Number(data.votes || 0).toLocaleString();
+      document.getElementById('statVotes').textContent =
+        Number(data.votes || 0).toLocaleString();
 
-  document.getElementById('statRevenue').textContent =
-    'GHS ' + Number(data.revenue || 0).toLocaleString();
+      document.getElementById('statRevenue').textContent =
+        'GHS ' + Number(data.revenue || 0).toLocaleString();
 
-  document.getElementById('statEarnings').textContent =
-    'GHS ' + Number(data.platform_earnings || 0).toLocaleString();
+      document.getElementById('statEarnings').textContent =
+        'GHS ' + Number(data.platform_earnings || 0).toLocaleString();
 
-} else {
-  statsGrid.classList.add('hidden');
-}
+    } else {
+      statsGrid.classList.add('hidden');
+    }
+
+    // USERS
     if (section === 'users') {
-  if (!Array.isArray(data) || data.length === 0) {
-    output.textContent = 'No users found.';
-    return;
-  }
+      if (!Array.isArray(data) || data.length === 0) {
+        output.textContent = 'No users found.';
+        return;
+      }
 
-      if (section === 'events') {
-  if (!Array.isArray(data) || data.length === 0) {
-    output.textContent = 'No events found.';
-    return;
-  }
+      output.innerHTML = `
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Registered</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.map(user => `
+                <tr>
+                  <td>${escapeHTML(user.name)}</td>
+                  <td>${escapeHTML(user.email)}</td>
+                  <td><span class="role-badge">${escapeHTML(user.role)}</span></td>
+                  <td>${escapeHTML(user.created_at)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      return;
+    }
 
-  output.innerHTML = `
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Event Title</th>
-            <th>Organiser</th>
-            <th>Status</th>
-            <th>Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(event => `
-            <tr>
-              <td>${escapeHTML(event.title || 'Untitled')}</td>
-              <td>${escapeHTML(event.organiser || '—')}</td>
-              <td>
-                <span class="role-badge">
-                  ${escapeHTML(event.status || 'Unknown')}
-                </span>
-              </td>
-              <td>${escapeHTML(event.created_at || '—')}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
+    // EVENTS
+    if (section === 'events') {
+      if (!Array.isArray(data) || data.length === 0) {
+        output.textContent = 'No events found.';
+        return;
+      }
 
-  return;
-}
-  output.innerHTML = `
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Registered</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(user => `
-            <tr>
-              <td>${escapeHTML(user.name)}</td>
-              <td>${escapeHTML(user.email)}</td>
-              <td>
-                <span class="role-badge">
-                  ${escapeHTML(user.role)}
-                </span>
-              </td>
-              <td>${escapeHTML(user.created_at)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
+      output.innerHTML = `
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Event Title</th>
+                <th>Organiser</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.map(event => `
+                <tr>
+                  <td>${escapeHTML(event.title || 'Untitled')}</td>
+                  <td>${escapeHTML(event.organiser || '—')}</td>
+                  <td><span class="role-badge">${escapeHTML(event.status || 'Unknown')}</span></td>
+                  <td>${escapeHTML(event.created_at || '—')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      return;
+    }
 
-  return;
-}
+    // APPLICATIONS
+    if (section === 'applications') {
+      if (!Array.isArray(data) || data.length === 0) {
+        output.textContent = 'No organiser applications found.';
+        return;
+      }
+
+      output.innerHTML = `
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Applicant</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Submitted</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.map(application => `
+                <tr>
+                  <td>${escapeHTML(application.name || '—')}</td>
+                  <td>${escapeHTML(application.email || '—')}</td>
+                  <td><span class="role-badge">${escapeHTML(application.status || 'Pending')}</span></td>
+                  <td>${escapeHTML(application.created_at || '—')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      return;
+    }
+
+    // OTHER SECTIONS
     let displayData = data;
 
     if (section === 'payouts') {
@@ -401,12 +432,6 @@ if (section === 'overview') {
   }
 }
 
-document.getElementById('managementMenu')
-  .addEventListener('click', function(event) {
-    const button = event.target.closest('button[data-section]');
-    if (!button) return;
-    showSection(button.dataset.section);
-  });
 
 async function loadDashboard() {
   try {
