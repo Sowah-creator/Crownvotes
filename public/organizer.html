@@ -1,0 +1,326 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrownVotes | Organiser Portal</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f3fa;color:#241b3d;font-family:Arial,sans-serif}
+header{background:#29145f;color:white;padding:20px}
+header h1{margin:0;font-size:25px}
+header p{margin:6px 0 0;color:#ded5f4}
+main{max-width:950px;margin:22px auto;padding:0 14px}
+.card{background:white;padding:20px;margin-bottom:16px;border-radius:13px;box-shadow:0 3px 14px #21104412}
+h2{margin-top:0;color:#29145f}
+input,textarea,button,select{width:100%;padding:13px;margin:7px 0;border-radius:8px;font-size:15px}
+input,textarea,select{border:1px solid #d8d1e5;background:white}
+textarea{min-height:90px;resize:vertical}
+button{border:0;background:#392078;color:white;font-weight:bold;cursor:pointer}
+button.secondary{background:#eee9f7;color:#29145f}
+.hidden{display:none!important}
+.message{padding:11px;border-radius:7px;background:#f0ebfa;margin:10px 0;white-space:pre-wrap}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.stat{background:#f1edfa;padding:14px;border-radius:9px}
+.stat strong{display:block;font-size:22px;margin-top:7px}
+.item{border:1px solid #e6e0ef;padding:13px;border-radius:9px;margin:10px 0}
+.topline{display:flex;justify-content:space-between;gap:10px;align-items:center}
+@media(min-width:650px){.stats{grid-template-columns:repeat(4,1fr)}}
+</style>
+</head>
+<body>
+<header>
+<h1>🏆 CrownVotes</h1>
+<p>Organiser Control Centre</p>
+</header>
+<main>
+
+<div id="authArea" class="card">
+<h2 id="authTitle">Organiser Login</h2>
+<div id="authMessage" class="message hidden"></div>
+<div id="loginForm">
+<input id="loginEmail" type="email" placeholder="Email address">
+<input id="loginPassword" type="password" placeholder="Password">
+<button onclick="login()">Sign In</button>
+<button class="secondary" onclick="showRegister()">Create an Account</button>
+</div>
+<div id="registerForm" class="hidden">
+<input id="regName" placeholder="Your full name">
+<input id="regEmail" type="email" placeholder="Email address">
+<input id="regPassword" type="password" placeholder="Password (minimum 10 characters)">
+<button onclick="register()">Create Account</button>
+<button class="secondary" onclick="showLogin()">Back to Login</button>
+</div>
+</div>
+
+<div id="applicationArea" class="card hidden">
+<h2>Organiser Application</h2>
+<p>Submit your details to request organiser access. Approval is required before creating events.</p>
+<div id="applicationMessage" class="message"></div>
+<input id="organisation" placeholder="Organisation or brand name">
+<input id="phone" placeholder="Phone number">
+<textarea id="details" placeholder="Tell us about your organisation and proposed events"></textarea>
+<button onclick="submitApplication()">Submit Application</button>
+<button class="secondary" onclick="logout()">Sign Out</button>
+</div>
+
+<div id="dashboard" class="hidden">
+<div class="card">
+<div class="topline">
+<h2>Organiser Dashboard</h2>
+<button style="width:auto" onclick="logout()">Sign Out</button>
+</div>
+<p id="welcome"></p>
+<div class="stats">
+<div class="stat">Total Votes<strong id="totalVotes">0</strong></div>
+<div class="stat">Gross Sales<strong id="gross">GH₵0.00</strong></div>
+<div class="stat">Your Earnings<strong id="earned">GH₵0.00</strong></div>
+<div class="stat">Available Balance<strong id="available">GH₵0.00</strong></div>
+</div>
+</div>
+
+<div class="card">
+<h2>Create a Voting Event</h2>
+<input id="eventTitle" placeholder="Event title">
+<textarea id="eventDescription" placeholder="Describe your event"></textarea>
+<label>Start date</label>
+<input id="eventStart" type="datetime-local">
+<label>Closing date</label>
+<input id="eventEnd" type="datetime-local">
+<label>Price per vote (GH₵)</label>
+<input id="votePrice" type="number" min="0.01" step="0.01" placeholder="Example: 1.00">
+<button onclick="createEvent()">Create Event</button>
+<div id="eventMessage" class="message hidden"></div>
+</div>
+
+<div class="card">
+<h2>My Voting Events</h2>
+<div id="eventsList">Loading...</div>
+</div>
+<div class="card">
+<h2>Recent Payments</h2>
+<div id="paymentsList">Loading...</div>
+</div>
+<div class="card">
+<h2>Payout History</h2>
+<div id="payoutsList">Loading...</div>
+</div>
+</div>
+
+<div id="eventManager" class="hidden">
+<div class="card">
+<button class="secondary" onclick="backToDashboard()">← Back to Dashboard</button>
+<h2 id="manageTitle">Manage Event</h2>
+<div id="manageMessage" class="message hidden"></div>
+<h3>Event Categories</h3>
+<input id="categoryName" placeholder="Category name">
+<textarea id="categoryDescription" placeholder="Category description"></textarea>
+<button onclick="addCategory()">Add Category</button>
+<div id="categoriesList"></div>
+<hr>
+<h3>Add Contestant / Nominee</h3>
+<select id="nomineeCategory"><option value="">Select category</option></select>
+<input id="nomineeName" placeholder="Contestant's full name">
+<textarea id="nomineeBio" placeholder="Contestant biography"></textarea>
+<input id="nomineeImage" placeholder="Contestant image URL (optional)">
+<button onclick="addNominee()">Add Nominee</button>
+<h3>Contestants and Voting Codes</h3>
+<div id="nomineesList"></div>
+</div>
+</div>
+</main>
+
+<script>
+const API='/api';
+const TOKEN_KEY='crownvotes_organizer_token';
+let token=localStorage.getItem(TOKEN_KEY)||'';
+let currentEvent=null;
+let currentCategories=[];
+
+function money(v){return 'GH₵'+(Number(v||0)/100).toFixed(2)}
+function show(id){
+['authArea','applicationArea','dashboard','eventManager'].forEach(x=>document.getElementById(x).classList.add('hidden'));
+document.getElementById(id).classList.remove('hidden');
+}
+function message(id,text){
+const e=document.getElementById(id);
+e.textContent=text;e.classList.remove('hidden');
+}
+async function api(path,options={}){
+const headers={'Content-Type':'application/json',...(options.headers||{})};
+if(token)headers.Authorization='Bearer '+token;
+const r=await fetch(API+path,{...options,headers});
+const d=await r.json().catch(()=>({}));
+if(!r.ok)throw new Error(d.error||'Request failed. Please try again.');
+return d;
+}
+function showRegister(){
+document.getElementById('loginForm').classList.add('hidden');
+document.getElementById('registerForm').classList.remove('hidden');
+document.getElementById('authTitle').textContent='Create Organiser Account';
+}
+function showLogin(){
+document.getElementById('registerForm').classList.add('hidden');
+document.getElementById('loginForm').classList.remove('hidden');
+document.getElementById('authTitle').textContent='Organiser Login';
+}
+async function login(){
+try{
+const d=await api('/auth/login',{method:'POST',body:JSON.stringify({
+email:document.getElementById('loginEmail').value.trim(),
+password:document.getElementById('loginPassword').value
+})});
+token=d.token;localStorage.setItem(TOKEN_KEY,token);await checkAccount();
+}catch(e){message('authMessage',e.message)}
+}
+async function register(){
+try{
+const d=await api('/auth/register',{method:'POST',body:JSON.stringify({
+name:document.getElementById('regName').value.trim(),
+email:document.getElementById('regEmail').value.trim(),
+password:document.getElementById('regPassword').value
+})});
+token=d.token;localStorage.setItem(TOKEN_KEY,token);await checkAccount();
+}catch(e){message('authMessage',e.message)}
+}
+async function checkAccount(){
+try{
+const u=await api('/me');
+document.getElementById('welcome').textContent='Welcome, '+u.name;
+if(u.role==='organiser'||u.role==='admin'){show('dashboard');await loadDashboard()}
+else{show('applicationArea');await loadApplication()}
+}catch(e){
+token='';localStorage.removeItem(TOKEN_KEY);show('authArea');message('authMessage',e.message);
+}
+}
+async function loadApplication(){
+try{
+const a=await api('/organiser/application');
+document.getElementById('applicationMessage').textContent='Application status: '+(a.status||a.application?.status||'not submitted')+'.';
+}catch(e){document.getElementById('applicationMessage').textContent=e.message}
+}
+async function submitApplication(){
+try{
+await api('/organiser/apply',{method:'POST',body:JSON.stringify({
+organisation:document.getElementById('organisation').value.trim(),
+phone:document.getElementById('phone').value.trim(),
+details:document.getElementById('details').value.trim()
+})});
+message('applicationMessage','Your application has been submitted. Please wait for administrator approval.');
+}catch(e){message('applicationMessage',e.message)}
+}
+async function loadDashboard(){
+try{
+const d=await api('/organiser/dashboard');
+const s=d.stats||d;
+document.getElementById('totalVotes').textContent=s.total_votes??s.votes??0;
+document.getElementById('gross').textContent=money(s.gross);
+document.getElementById('earned').textContent=money(s.earned);
+document.getElementById('available').textContent=money(s.available);
+renderEvents(d.events||[]);
+renderPayments(d.recent_payments||[]);
+renderPayouts(d.payouts||[]);
+}catch(e){document.getElementById('eventsList').textContent=e.message}
+}
+function renderEvents(items){
+const el=document.getElementById('eventsList');el.innerHTML='';
+if(!items.length){el.textContent='You have not created any events yet.';return}
+items.forEach(v=>{
+const box=document.createElement('div');box.className='item';
+const h=document.createElement('h3');h.textContent=v.title||'Untitled event';
+const p=document.createElement('p');p.textContent='Status: '+(v.status||'draft')+' | Event ID: '+v.id;
+const b=document.createElement('button');b.textContent='Manage Event';b.onclick=()=>openEvent(v.id,v.title);
+box.append(h,p,b);el.append(box);
+});
+}
+function renderPayments(items){
+const el=document.getElementById('paymentsList');el.innerHTML='';
+if(!items.length){el.textContent='No payments recorded yet.';return}
+items.forEach(p=>{const x=document.createElement('div');x.className='item';x.textContent='Payment: '+money(p.amount)+' | Status: '+(p.status||'Unknown');el.append(x)});
+}
+function renderPayouts(items){
+const el=document.getElementById('payoutsList');el.innerHTML='';
+if(!items.length){el.textContent='No payouts recorded yet.';return}
+items.forEach(p=>{const x=document.createElement('div');x.className='item';x.textContent='Payout: '+money(p.amount)+' | Status: '+(p.status||'Unknown');el.append(x)});
+}
+async function createEvent(){
+const title=document.getElementById('eventTitle').value.trim();
+const description=document.getElementById('eventDescription').value.trim();
+const start_at=document.getElementById('eventStart').value;
+const end_at=document.getElementById('eventEnd').value;
+const price=Number(document.getElementById('votePrice').value);
+if(!title||!description||!price||price<=0){message('eventMessage','Enter an event title, description and valid vote price.');return}
+try{
+await api('/organiser/events',{method:'POST',body:JSON.stringify({
+title,description,start_at,end_at,vote_price:Math.round(price*100)
+})});
+message('eventMessage','Event created successfully as a draft, pending approval.');
+await loadDashboard();
+}catch(e){message('eventMessage',e.message)}
+}
+async function openEvent(id,title){
+currentEvent=id;document.getElementById('manageTitle').textContent=title||'Manage Event';
+show('eventManager');await loadEvent();
+}
+async function loadEvent(){
+try{
+const d=await api('/organiser/events/'+currentEvent);
+currentCategories=d.categories||[];
+renderCategories();renderNominees(d.nominees||[]);
+}catch(e){message('manageMessage',e.message)}
+}
+function renderCategories(){
+const list=document.getElementById('categoriesList');
+const select=document.getElementById('nomineeCategory');
+list.innerHTML='';select.innerHTML='<option value="">Select category</option>';
+currentCategories.forEach(c=>{
+const item=document.createElement('div');item.className='item';item.textContent=c.name;list.append(item);
+const o=document.createElement('option');o.value=c.id;o.textContent=c.name;select.append(o);
+});
+}
+function renderNominees(items){
+const list=document.getElementById('nomineesList');list.innerHTML='';
+if(!items.length){list.textContent='No nominees added yet.';return}
+items.forEach(n=>{
+const item=document.createElement('div');item.className='item';
+const h=document.createElement('h3');h.textContent=n.name;
+const p=document.createElement('p');p.textContent=n.bio||'';
+const code=document.createElement('strong');code.textContent='Voting code: '+(n.short_code||'Not assigned');
+const votes=document.createElement('p');votes.textContent='Votes: '+(n.vote_count??n.votes??0);
+item.append(h,p,code,votes);list.append(item);
+});
+}
+async function addCategory(){
+const name=document.getElementById('categoryName').value.trim();
+const description=document.getElementById('categoryDescription').value.trim();
+if(!name){message('manageMessage','Enter a category name.');return}
+try{
+await api('/organiser/events/'+currentEvent+'/categories',{method:'POST',body:JSON.stringify({name,description})});
+document.getElementById('categoryName').value='';
+document.getElementById('categoryDescription').value='';
+await loadEvent();message('manageMessage','Category added.');
+}catch(e){message('manageMessage',e.message)}
+}
+async function addNominee(){
+const category_id=document.getElementById('nomineeCategory').value;
+const name=document.getElementById('nomineeName').value.trim();
+const bio=document.getElementById('nomineeBio').value.trim();
+const image_url=document.getElementById('nomineeImage').value.trim();
+if(!category_id||!name){message('manageMessage','Select a category and enter the nominee name.');return}
+try{
+await api('/organiser/categories/'+category_id+'/nominees',{method:'POST',body:JSON.stringify({name,bio,image_url})});
+document.getElementById('nomineeName').value='';
+document.getElementById('nomineeBio').value='';
+document.getElementById('nomineeImage').value='';
+await loadEvent();message('manageMessage','Nominee added successfully.');
+}catch(e){message('manageMessage',e.message)}
+}
+function backToDashboard(){show('dashboard');loadDashboard()}
+function logout(){
+token='';localStorage.removeItem(TOKEN_KEY);show('authArea');showLogin();
+}
+if(token){checkAccount()}else{show('authArea')}
+</script>
+</body>
+</html>
